@@ -1,0 +1,1781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Deep End">
+<meta name="theme-color" content="#0C4A50">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<title>Deep End — Pool & LSI Manager</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --plaster:#EDF2F1; --card:#FFFFFF; --deepend:#0C4A50; --water:#177E96;
+  --waterlite:#E2EFF2; --ink:#15292C; --mist:#5D7377; --line:#D5E0DF;
+  --amber:#A66A12; --amberbg:#FBF3E4; --alert:#A93A26; --alertbg:#F9EAE6;
+  --ok:#1D6E4B; --okbg:#E5F2EB; --tile:#2F5DD0;
+  --r:14px; --shadow:0 1px 2px rgba(12,74,80,.06),0 4px 14px rgba(12,74,80,.07);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%;font-size:16px}
+html[data-fs="small"]{font-size:14px}
+html[data-fs="large"]{font-size:18.5px}
+body{font-family:"Instrument Sans",system-ui,sans-serif;background:var(--plaster);color:var(--ink);
+  font-size:1.0rem;line-height:1.45;padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+h1,h2,h3{font-family:"Bricolage Grotesque","Instrument Sans",sans-serif;color:var(--deepend);line-height:1.15}
+.mono{font-family:"IBM Plex Mono",monospace}
+header.app{padding:calc(14px + env(safe-area-inset-top)) 18px 10px;display:flex;align-items:baseline;gap:10px}
+header.app h1{font-size:1.5rem;font-weight:800;letter-spacing:-.02em}
+header.app .sub{font-size:0.75rem;color:var(--mist);font-family:"IBM Plex Mono",monospace;text-transform:uppercase;letter-spacing:.08em}
+main{padding:0 14px;max-width:640px;margin:0 auto}
+.view{display:none}.view.active{display:block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:16px;margin-bottom:14px}
+.card h2{font-size:1.0625rem;font-weight:800;margin-bottom:10px}
+.card h3{font-size:0.875rem;font-weight:600;margin:12px 0 6px}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:0.6875rem;text-transform:uppercase;letter-spacing:.1em;color:var(--water);margin-bottom:4px}
+.muted{color:var(--mist);font-size:0.8125rem}
+.small{font-size:0.8125rem}
+/* LSI depth gauge — the signature */
+.gauge-wrap{margin:6px 0 4px}
+.gauge{position:relative;height:46px}
+.gauge .track{position:absolute;left:0;right:0;top:18px;height:12px;border-radius:6px;overflow:hidden;display:flex;border:1px solid var(--line)}
+.gauge .z{height:100%}
+.gauge .z.corr{background:repeating-linear-gradient(45deg,#C97F6E,#C97F6E 6px,#BE6B58 6px,#BE6B58 12px);flex:35}
+.gauge .z.low{background:#E9C98F;flex:12.5}
+.gauge .z.ok{background:linear-gradient(90deg,#63A5B5,#177E96 55%,#0C4A50);flex:17.5}
+.gauge .z.hi{background:#E9C98F;flex:10}
+.gauge .z.scale{background:repeating-linear-gradient(45deg,#C4B06A,#C4B06A 6px,#B39C50 6px,#B39C50 12px);flex:25}
+.gauge .needle{position:absolute;top:6px;width:3px;height:36px;background:var(--ink);border-radius:2px;transform:translateX(-50%);transition:left .5s cubic-bezier(.2,.8,.2,1)}
+.gauge .needle::after{content:"";position:absolute;top:-2px;left:50%;transform:translateX(-50%);border:6px solid transparent;border-top-color:var(--ink)}
+.gauge .ticks{position:absolute;left:0;right:0;top:34px;display:flex;justify-content:space-between;font-family:"IBM Plex Mono",monospace;font-size:0.625rem;color:var(--mist)}
+.lsi-read{display:flex;align-items:baseline;gap:10px;margin-top:14px}
+.lsi-read .num{font-family:"IBM Plex Mono",monospace;font-size:2.125rem;font-weight:600;color:var(--deepend)}
+.chip{display:inline-block;font-size:0.75rem;font-weight:600;padding:3px 10px;border-radius:999px}
+.chip.ok{background:var(--okbg);color:var(--ok)}
+.chip.warn{background:var(--amberbg);color:var(--amber)}
+.chip.bad{background:var(--alertbg);color:var(--alert)}
+.chip.info{background:var(--waterlite);color:var(--water)}
+/* readings grid */
+.rgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px}
+.rcell{background:var(--plaster);border-radius:10px;padding:8px 10px}
+.rcell .lab{font-size:0.6875rem;color:var(--mist);text-transform:uppercase;letter-spacing:.05em}
+.rcell .val{font-family:"IBM Plex Mono",monospace;font-size:1.0rem;font-weight:600}
+/* forms */
+label.f{display:block;margin:12px 0 4px;font-weight:600;font-size:0.875rem}
+input[type=number],input[type=text],input[type=date],select,textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:1.0rem;font-family:"IBM Plex Mono",monospace;background:#fff;color:var(--ink)}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--water);outline-offset:1px}
+select{font-family:"Instrument Sans",sans-serif}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end}
+.row2>div{display:flex;flex-direction:column;justify-content:flex-end}
+.row2>div>label.f{margin-top:0}
+.seg{display:flex;background:var(--plaster);border-radius:10px;padding:3px;gap:3px;margin-top:4px}
+.seg button{flex:1;border:0;background:transparent;padding:9px 6px;border-radius:8px;font-size:0.875rem;font-weight:600;color:var(--mist);font-family:inherit}
+.seg button.on{background:#fff;color:var(--deepend);box-shadow:0 1px 3px rgba(12,74,80,.15)}
+.btn{display:inline-block;border:0;border-radius:11px;padding:13px 18px;font-size:0.9375rem;font-weight:600;font-family:inherit;cursor:pointer}
+.btn.primary{background:var(--water);color:#fff;width:100%}
+.btn.primary:active{background:var(--deepend)}
+.btn.ghost{background:transparent;color:var(--water);border:1.5px solid var(--water)}
+.btn.quiet{background:var(--plaster);color:var(--deepend)}
+.btn.danger{background:var(--alertbg);color:var(--alert)}
+.btn.sm{padding:8px 12px;font-size:0.8125rem;border-radius:9px}
+.btnrow{display:flex;gap:10px;margin-top:12px}
+.btnrow .btn{flex:1}
+/* wizard */
+.steps{display:flex;gap:5px;margin:4px 0 14px}
+.steps i{flex:1;height:4px;border-radius:2px;background:var(--line)}
+.steps i.done{background:var(--water)}
+.hint{background:var(--waterlite);border-radius:10px;padding:10px 12px;font-size:0.8125rem;color:var(--deepend);margin-top:10px}
+.hint b{font-weight:600}
+.target{font-family:"IBM Plex Mono",monospace;font-size:0.75rem;color:var(--mist);margin-top:6px}
+/* dose plan */
+.dose{border:1px solid var(--line);border-radius:11px;padding:12px;margin-top:10px}
+.dose .amt{font-family:"IBM Plex Mono",monospace;font-size:1.125rem;font-weight:600;color:var(--deepend)}
+.dose .why{font-size:0.8125rem;color:var(--mist);margin-top:2px}
+.dose .seqn{display:inline-block;background:var(--deepend);color:#fff;font-family:"IBM Plex Mono",monospace;font-size:0.75rem;border-radius:6px;padding:2px 7px;margin-right:8px}
+.dose .wait{font-size:0.75rem;color:var(--amber);margin-top:6px;font-weight:600}
+.dose label.ck{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:0.875rem;font-weight:600}
+.dose input[type=checkbox]{width:20px;height:20px;accent-color:var(--water)}
+/* filters */
+.fitem{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}
+.fitem:last-child{border-bottom:0}
+.fitem .nm{font-weight:600}
+.fitem .meta{font-size:0.75rem;color:var(--mist);font-family:"IBM Plex Mono",monospace}
+/* log */
+.lentry{border-bottom:1px solid var(--line);padding:12px 0}
+.lentry:last-child{border-bottom:0}
+.lentry summary{display:flex;justify-content:space-between;align-items:baseline;cursor:pointer;list-style:none}
+.lentry summary::-webkit-details-marker{display:none}
+.lentry .d{font-weight:600}
+.lentry .lsi{font-family:"IBM Plex Mono",monospace;font-size:0.875rem}
+.lentry .body{margin-top:8px;font-size:0.8125rem;color:var(--mist)}
+canvas.spark{width:100%;height:110px;display:block}
+/* bottom nav */
+nav.tabs{position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.94);backdrop-filter:blur(12px);border-top:1px solid var(--line);display:flex;padding:6px 8px calc(6px + env(safe-area-inset-bottom))}
+nav.tabs button{flex:1;border:0;background:transparent;font-family:inherit;font-size:0.6875rem;font-weight:600;color:var(--mist);padding:6px 2px;border-radius:10px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer}
+nav.tabs button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+nav.tabs button.on{color:var(--deepend)}
+nav.tabs button.on svg{stroke:var(--water)}
+.warnbar{border-radius:11px;padding:10px 12px;font-size:0.8125rem;font-weight:600;margin-bottom:10px}
+.warnbar.warn{background:var(--amberbg);color:var(--amber)}
+.warnbar.bad{background:var(--alertbg);color:var(--alert)}
+.emptymsg{text-align:center;color:var(--mist);padding:26px 10px;font-size:0.875rem}
+.shelfitem{display:grid;grid-template-columns:1fr 92px;gap:8px;margin-top:8px;align-items:center}
+.shelfitem .cat{font-size:0.6875rem;color:var(--mist);text-transform:uppercase;letter-spacing:.05em;grid-column:1/-1;margin-top:6px}
+hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
+.modal-ov{position:fixed;inset:0;background:rgba(12,42,46,.45);z-index:200;display:none;align-items:center;justify-content:center;padding:24px}
+.modal-box{background:#fff;border-radius:16px;padding:18px;max-width:340px;width:100%;box-shadow:0 10px 40px rgba(12,74,80,.35)}
+.modal-box .msg{font-size:0.9375rem;font-weight:600;color:var(--deepend)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(88px + env(safe-area-inset-bottom));background:var(--deepend);color:#fff;font-size:0.875rem;font-weight:600;padding:10px 18px;border-radius:999px;z-index:300;box-shadow:0 4px 18px rgba(12,74,80,.4);max-width:88vw;text-align:center;display:none}
+@media (prefers-reduced-motion: reduce){.gauge .needle{transition:none}}
+</style>
+</head>
+<body>
+<header class="app"><h1>Deep End</h1><span class="sub">Pool &amp; LSI Manager</span></header>
+<main>
+
+<!-- DASHBOARD -->
+<section class="view" id="view-dash">
+  <div id="dash-warnings"></div>
+  <div class="card">
+    <div class="eyebrow">Water Balance</div>
+    <h2 id="dash-lsi-title">Saturation Index</h2>
+    <div class="gauge-wrap">
+      <div class="gauge">
+        <div class="track">
+          <div class="z corr"></div><div class="z low"></div><div class="z ok"></div><div class="z hi"></div><div class="z scale"></div>
+        </div>
+        <div class="needle" id="gauge-needle" style="left:50%"></div>
+        <div class="ticks"><span>-1.0</span><span>-0.5</span><span>0</span><span>+0.5</span><span>+1.0</span></div>
+      </div>
+    </div>
+    <div class="lsi-read"><span class="num" id="dash-lsi">—</span><span id="dash-lsi-chip"></span></div>
+    <div class="muted" id="dash-lsi-when"></div>
+    <div class="rgrid" id="dash-readings"></div>
+    <div class="btnrow"><button class="btn primary" onclick="startWizard()">Start a test session</button></div>
+  </div>
+  <div class="card" id="dash-projection"></div>
+  <div class="card" id="dash-filters"></div>
+</section>
+
+<!-- TEST WIZARD -->
+<section class="view" id="view-test">
+  <div class="card">
+    <div class="eyebrow" id="wiz-eyebrow">Test Session</div>
+    <div class="steps" id="wiz-steps"></div>
+    <div id="wiz-body"></div>
+  </div>
+</section>
+
+<!-- FILTERS -->
+<section class="view" id="view-filters">
+  <div class="card">
+    <div class="eyebrow">Equipment</div>
+    <h2>Filters</h2>
+    <div id="filter-list"></div>
+    <div class="btnrow" id="add-filter-btnrow"><button class="btn ghost" onclick="toggleAddFilter(true)">+ Add filter</button></div>
+    <div id="add-filter-form" style="display:none">
+      <hr class="soft">
+      <h3>Add a filter</h3>
+      <label class="f">Name</label>
+      <input type="text" id="nf-name" placeholder="Main cartridge">
+      <div class="row2">
+        <div><label class="f">Type</label>
+          <select id="nf-type"><option value="cartridge">Cartridge</option><option value="sand">Sand</option><option value="de">DE</option></select></div>
+        <div><label class="f">Clean every (days)</label><input type="number" id="nf-clean" value="30" inputmode="numeric"></div>
+      </div>
+      <div class="row2">
+        <div><label class="f">Replace every (months)</label><input type="number" id="nf-replace" value="18" inputmode="numeric"></div>
+        <div><label class="f">Last cleaned</label><input type="date" id="nf-lastclean"></div>
+      </div>
+      <label class="f">Last replaced / media changed</label>
+      <input type="date" id="nf-lastreplace">
+      <div class="btnrow"><button class="btn quiet" onclick="toggleAddFilter(false)">Cancel</button><button class="btn primary" onclick="addFilter()">Add filter</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- LOG -->
+<section class="view" id="view-log">
+  <div class="card">
+    <div class="eyebrow">History</div>
+    <h2>Trends</h2>
+    <div id="trend-wrap">
+      <h3>LSI</h3><canvas class="spark" id="spark-lsi"></canvas>
+      <h3>pH</h3><canvas class="spark" id="spark-ph"></canvas>
+      <h3 id="spark-third-title">Salt (ppm)</h3><canvas class="spark" id="spark-third"></canvas>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Treatment log</h2>
+    <div id="log-list"></div>
+    <div class="btnrow"><button class="btn quiet" onclick="exportCSV()">Export CSV</button></div>
+  </div>
+</section>
+
+<!-- SETTINGS -->
+<section class="view" id="view-settings">
+  <div class="card">
+    <div class="eyebrow">Setup</div>
+    <h2>Pool profile</h2>
+    <label class="f">Sanitizer</label>
+    <div class="seg" id="seg-sanitizer">
+      <button data-v="salt">Salt (SWG)</button><button data-v="chlorine">Chlorine</button>
+    </div>
+    <label class="f">Pool + spa combined system?</label>
+    <div class="seg" id="seg-combined"><button data-v="no">Pool only</button><button data-v="yes">Pool + spa</button></div>
+    <div class="row2">
+      <div><label class="f">Pool gallons</label><input type="number" id="set-gallons" inputmode="numeric" placeholder="12000"></div>
+      <div id="spa-gal-wrap" style="display:none"><label class="f">Spa gallons</label><input type="number" id="set-spagallons" inputmode="numeric" placeholder="500"></div>
+    </div>
+    <label class="f">Surface</label>
+    <div class="seg" id="seg-surface"><button data-v="plaster">Plaster / pebble</button><button data-v="liner">Vinyl liner</button></div>
+    <label class="f">Installation</label>
+    <div class="seg" id="seg-ground"><button data-v="inground">In-ground</button><button data-v="aboveground">Above-ground</button></div>
+    <label class="f">Test kit</label>
+    <select id="set-kit">
+      <option value="k2006">Taylor K-2006 (FAS-DPD drop kit)</option>
+      <option value="basic">Basic drop kit</option>
+      <option value="strips">Test strips</option>
+      <option value="digital">Digital (Spin / ColorQ)</option>
+    </select>
+    <div class="row2">
+      <div><label class="f">Avg depth (ft)</label><input type="number" id="set-depth" step="0.5" inputmode="decimal" placeholder="5"></div>
+      <div><label class="f">Surface area (sq ft)</label><input type="number" id="set-area" inputmode="numeric" placeholder="auto"></div>
+    </div>
+    <div class="muted small">Surface area is used for rain &amp; evaporation math. Leave blank to estimate from gallons ÷ depth.</div>
+    <div class="row2" id="salt-target-wrap">
+      <div><label class="f">Salt cell target (ppm)</label><input type="number" id="set-celltarget" inputmode="numeric" placeholder="3200"></div>
+      <div><label class="f">Fill water CH (ppm)</label><input type="number" id="set-fillch" inputmode="numeric" placeholder="optional"></div>
+    </div>
+    <div class="row2">
+      <div><label class="f">Target CYA (ppm)</label><input type="number" id="set-cyatarget" inputmode="numeric" placeholder="50"></div>
+      <div><label class="f">Acid per demand drop (oz)</label><input type="number" id="set-ozperdrop" step="0.5" inputmode="decimal" placeholder="10"></div>
+    </div>
+    <div class="muted small">App keeps CYA within ±10 of this. FC target derives from CYA (~5%), clamped to the range below. Acid-per-drop is your verified figure for the R-0005 acid-demand test — each drop calls for this many ounces of acid.</div>
+    <div class="row2">
+      <div><label class="f">FC min (ppm)</label><input type="number" id="set-fcmin" step="0.5" inputmode="decimal" placeholder="2"></div>
+      <div><label class="f">FC max (ppm)</label><input type="number" id="set-fcmax" step="0.5" inputmode="decimal" placeholder="5"></div>
+    </div>
+  </div>
+
+  <div class="card" id="cell-card">
+    <h2>Salt cell &amp; run schedule</h2>
+    <label class="f">Salt cell model</label>
+    <select id="set-cell">
+      <option value="t15">Hayward TurboCell T-CELL-15 — 40k gal</option>
+      <option value="t9">Hayward TurboCell T-CELL-9 — 25k gal</option>
+      <option value="t3">Hayward TurboCell T-CELL-3 — 15k gal</option>
+    </select>
+    <div class="muted small">Read the model off the cell housing collar. The app self-calibrates effective output from your logged data over time.</div>
+    <h3>Seasonal presets</h3>
+    <div class="muted small">Pump hours/day and cell output % per season. Pre-filled into each test session; the new season takes effect at your next test.</div>
+    <div id="season-editor"></div>
+  </div>
+
+  <div class="card">
+    <h2>Weather location</h2>
+    <div class="muted small">Used to pull rainfall and evaporation from Open-Meteo for projections. Nothing is stored off this device.</div>
+    <div class="row2">
+      <div><label class="f">Latitude</label><input type="number" id="set-lat" step="0.0001" inputmode="decimal"></div>
+      <div><label class="f">Longitude</label><input type="number" id="set-lon" step="0.0001" inputmode="decimal"></div>
+    </div>
+    <div class="btnrow"><button class="btn ghost" onclick="useMyLocation()">Use my location</button></div>
+    <div class="muted small" id="loc-status"></div>
+  </div>
+
+  <div class="card">
+    <h2>Product shelf</h2>
+    <div class="muted small">The dosing engine only speaks in these products. Edit names and strengths to match what you actually buy.</div>
+    <div id="shelf-editor"></div>
+  </div>
+
+  <div class="card">
+    <h2>Enhancements</h2>
+    <div class="muted small">Capture ideas and improvement notes for future versions.</div>
+    <label class="f">Enhancement notes</label>
+    <div class="seg" id="seg-enh"><button data-v="off">Off</button><button data-v="on">On</button></div>
+    <div id="enh-body" style="display:none">
+      <label class="f">New note</label>
+      <textarea id="enh-input" rows="2" placeholder="Idea, tweak, bug&hellip;"></textarea>
+      <div class="btnrow"><button class="btn primary" onclick="addEnh()">Add note</button></div>
+      <hr class="soft">
+      <div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">Notes</h3>
+        <div style="display:flex;gap:6px"><button class="btn sm quiet" id="enh-copyall" onclick="copyAllEnh()">Copy all</button><button class="btn sm quiet" id="enh-selbtn" onclick="toggleEnhSel()">Select</button></div></div>
+      <div id="enh-list"></div>
+      <div class="btnrow" id="enh-selactions" style="display:none"><button class="btn quiet" onclick="toggleEnhSelectAll()" id="enh-selall">Select all</button><button class="btn primary" onclick="copySelectedEnh()">Copy selected</button></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Display</h2>
+    <label class="f">Text size</label>
+    <div class="seg" id="seg-fontsize">
+      <button data-v="small">Small</button><button data-v="medium">Medium</button><button data-v="large">Large</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>About</h2>
+    <div class="mono small" id="about-version"></div>
+    <div id="about-notes"></div>
+  </div>
+
+  <div class="card">
+    <h2>Data</h2>
+    <div class="btnrow">
+      <button class="btn quiet" onclick="exportJSON()">Back up (JSON)</button>
+      <button class="btn quiet" onclick="document.getElementById('import-file').click()">Restore</button>
+    </div>
+    <input type="file" id="import-file" accept="application/json" style="display:none" onchange="importJSON(event)">
+    <hr class="soft">
+    <button class="btn danger" onclick="resetAll()">Erase all data</button>
+  </div>
+</section>
+
+</main>
+
+<nav class="tabs">
+  <button data-view="dash" class="on"><svg viewBox="0 0 24 24"><path d="M3 12c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 17c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 7c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/></svg>Pool</button>
+  <button data-view="test"><svg viewBox="0 0 24 24"><path d="M9 3h6M10 3v5l-4.5 8.5A3 3 0 0 0 8.2 21h7.6a3 3 0 0 0 2.7-4.5L14 8V3"/><path d="M7.5 15h9"/></svg>Test</button>
+  <button data-view="filters"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16M6 6.5c3 2 9 2 12 0M6 17.5c3-2 9-2 12 0"/></svg>Filters</button>
+  <button data-view="log"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg>Log</button>
+  <button data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.06-.4.1-.8.1-1.2Z"/></svg>Settings</button>
+</nav>
+
+<div id="app-modal" class="modal-ov"><div class="modal-box"><div class="msg" id="app-modal-msg"></div>
+<div class="btnrow"><button class="btn quiet" id="app-modal-no">Cancel</button><button class="btn danger" id="app-modal-yes">Confirm</button></div></div></div>
+<div id="form-modal" class="modal-ov"><div class="modal-box"><h3 id="form-modal-title" style="margin-bottom:4px"></h3>
+<div id="form-modal-body"></div>
+<div class="btnrow"><button class="btn quiet" id="form-modal-cancel">Cancel</button><button class="btn primary" id="form-modal-save">Save</button></div></div></div>
+<div id="toast" class="toast"></div>
+<script>
+/* ============ VERSION ============ */
+const APP_VERSION = "1.11.0";
+const RELEASE_NOTES = [
+  {v:"1.11.0", d:"Aug 2, 2026", items:[
+    "Added \u201cCancel without saving\u201d on the results screen to discard a test session before logging it (with a confirm).",
+    "The first test step now shows Cancel instead of a dead end, so you can always back out of the wizard."
+  ]},
+  {v:"1.10.0", d:"Aug 2, 2026", items:[
+    "Don\u2019t retest calcium, alkalinity or CYA every time? Each of those steps now offers \u201cUse last recorded value.\u201d The value carries forward and the session marks it as not tested that day (shown on the review screen and tagged with * in the log).",
+    "If a parameter has never been recorded, entry is still required \u2014 there\u2019s nothing to carry.",
+    "Gentle dashboard nudge when CYA (45 days) or calcium (60 days) hasn\u2019t been freshly tested, since those drift over time."
+  ]},
+  {v:"1.9.1", d:"Aug 2, 2026", items:[
+    "Fixed input alignment in Settings: when a field label wraps to two lines (like \u201cAcid per demand drop (oz)\u201d), its input box no longer drops below the field beside it. Paired fields now line up on every row."
+  ]},
+  {v:"1.9.0", d:"Aug 2, 2026", items:[
+    "Acid-demand dosing now uses your own verified figure: set \u201cAcid per demand drop (oz)\u201d in Settings (default 10). Each R-0005 drop = that many ounces; 2 drops = 20 oz, 4.5 drops = 45 oz.",
+    "Replaces the old theoretical per-gallon estimate, which was giving far too little acid for your pool.",
+    "Acid-demand dose now shows in plain fluid ounces (e.g. 20 fl oz) instead of cups/quarts."
+  ]},
+  {v:"1.8.1", d:"Jul 20, 2026", items:[
+    "Corrected the K-2006 free-chlorine test tip: 10 mL sample, 2 dippers of R-0870, titrate R-0871 with each drop = 0.5 ppm (25 mL sample for finer 0.2 ppm/drop). Prior text had the sample sizes and reagent measure wrong."
+  ]},
+  {v:"1.8.0", d:"Jul 20, 2026", items:[
+    "Every test now explains itself: a \u201cWhy nothing else?\u201d section spells out why each product was or wasn\u2019t recommended \u2014 e.g. why high-looking pH needs no acid (it\u2019s at the LSI-balanced target), or why salt at 2900 is left alone (inside the band).",
+    "The reasoning is saved with each session and shown in the treatment log, so past entries explain themselves too (older entries recompute their reasons on the fly)."
+  ]},
+  {v:"1.7.0", d:"Jul 20, 2026", items:[
+    "pH off the scale (>8.0)? New toggle in the pH step: enter your R-0005 acid-demand drops and the readable pH you titrated down to.",
+    "The acid-demand drops become your dose; the session logs pre-dose reality (pH \u22658.0) so history and projections stay honest.",
+    "LSI for off-scale entries is computed at the 8.0 floor and flagged as a minimum \u2014 true scaling risk is higher."
+  ]},
+  {v:"1.6.0", d:"Jul 20, 2026", items:[
+    "Add-a-filter form is now tucked behind an \u201cAdd filter\u201d button — tap to open it, so the Filters screen stays clean.",
+    "Filter schedules and reminders now read in plain English (\u201cclean every 30 days\u201d, \u201cReplace in 12 months\u201d) instead of shorthand \u2014 on both the Filters tab and the dashboard."
+  ]},
+  {v:"1.5.0", d:"Jul 20, 2026", items:[
+    "Text size control (Small / Medium / Large) in Settings — scales the whole app.",
+    "Release notes now collapse: tap a version to expand it; newest is open by default."
+  ]},
+  {v:"1.4.0", d:"Jul 19, 2026", items:[
+    "Adjustable target CYA in Settings (default 50 ppm) with an auto \u00b110 band.",
+    "Acid dose from the K-2006 acid-demand test (R-0005): optional entry in the pH step, half-drop increments, shown alongside the pH-based estimate.",
+    "Edit filters, log entries, and enhancement notes via a single edit modal; log timestamps stay locked to protect projections.",
+    "Enhancement notes: Select-all and copy all-or-selected.",
+    "Salt cell setup (Hayward TurboCell) + seasonal pump/output presets, and a predictive free-chlorine model that recommends output % / run-hour adjustments without over-correcting.",
+    "Log pump run-hours, cell output %, and bather load with each test."
+  ]},
+  {v:"1.3.0", d:"Jul 19, 2026", items:[
+    "Fixed: Remove buttons did nothing in environments that block browser dialogs (sandboxed previews, some iOS home-screen modes).",
+    "All browser confirm/alert dialogs replaced with an in-app confirm modal and toast messages \u2014 enhancement notes, filter remove, erase-all, wizard warnings, restore messages.",
+    "No behavior depends on window.confirm or window.alert anywhere in the app now."
+  ]},
+  {v:"1.2.0", d:"Jul 19, 2026", items:[
+    "Enhancements section in Settings with an on/off toggle.",
+    "When on: add timestamped enhancement notes, remove individually (permanent), Select mode with Copy-selected for pasting into a build session.",
+    "Notes ride along in JSON backup/restore."
+  ]},
+  {v:"1.1.0", d:"Jul 19, 2026", items:[
+    "In-app release notes (this list) in Settings → About.",
+    "Backups and CSV exports now carry version + date in the filename; backups embed the app version for safe restores.",
+    "Home-screen icon for iOS (apple-touch-icon.png ships alongside this file — deploy both).",
+    "Restore accepts both v1.0 and v1.1 backup formats."
+  ]},
+  {v:"1.0.0", d:"Jul 19, 2026", items:[
+    "Guided test wizard with K-2006 drop tips, kit-aware input steps, and prior readings shown.",
+    "LSI engine on carbonate alkalinity (TA − CYA/3) with salinity-derived TDS; pH target solved from the LSI equation.",
+    "Sequenced dosing plan in your shelf's products, with wait times and no acid double-dosing.",
+    "Filter cleaning/replacement tracking with dashboard warnings.",
+    "Projections from Open-Meteo rain + evaporation and learned drift rates.",
+    "Treatment log, trend charts with target bands, CSV export, JSON backup/restore."
+  ]}
+];
+/* ============ STATE ============ */
+const DEFAULT_SHELF = {
+  acid:    {label:"Muriatic acid", strength:31.45, unit:"floz"},
+  phup:    {label:"Soda ash (pH up)", strength:100, unit:"oz"},
+  bicarb:  {label:"Sodium bicarbonate", strength:100, unit:"lb"},
+  calcium: {label:"Calcium chloride", strength:77, unit:"lb"},
+  cya:     {label:"Stabilizer (CYA)", strength:100, unit:"oz"},
+  salt:    {label:"Pool salt", strength:100, unit:"lb"},
+  chlorine:{label:"Liquid chlorine", strength:12.5, unit:"floz"}
+};
+const BLANK = {
+  profile:{sanitizer:"salt", combined:"no", gallons:null, spaGallons:null, surface:"plaster",
+    ground:"inground", kit:"k2006", avgDepth:5, areaSqFt:null, cellTarget:3200, fillCH:null,
+    lat:null, lon:null, cyaTarget:50, fcMin:2, fcMax:5, fontSize:"medium", ozPerDrop:10,
+    cell:"t15", cellEffFactor:null,
+    seasonStarts:{spring:3, summer:6, fall:9, winter:12},
+    seasons:{
+      spring:{hours:8, output:50}, summer:{hours:10, output:60},
+      fall:{hours:8, output:45}, winter:{hours:6, output:30}
+    },
+    seasonPromptedYear:{}},
+  shelf: JSON.parse(JSON.stringify(DEFAULT_SHELF)),
+  filters:[], log:[], enh:{on:false, notes:[]}
+};
+const CELLS = {
+  t15:{label:"Hayward TurboCell T-CELL-15 (40k gal)", lbday:1.45},
+  t9: {label:"Hayward TurboCell T-CELL-9 (25k gal)",  lbday:0.98},
+  t3: {label:"Hayward TurboCell T-CELL-3 (15k gal)",  lbday:0.53}
+};
+const SEASON_NAMES = {spring:"Spring", summer:"Summer", fall:"Fall", winter:"Winter"};
+let S = load();
+function load(){
+  try{ const raw = localStorage.getItem("deepend-v1");
+    if(raw){ const s = JSON.parse(raw);
+      s.shelf = Object.assign(JSON.parse(JSON.stringify(DEFAULT_SHELF)), s.shelf||{});
+      s.enh = Object.assign({on:false, notes:[]}, s.enh||{});
+      s.profile = Object.assign(JSON.parse(JSON.stringify(BLANK.profile)), s.profile||{});
+      return Object.assign(JSON.parse(JSON.stringify(BLANK)), s); } }
+  catch(e){ console.warn("load failed", e); }
+  return JSON.parse(JSON.stringify(BLANK));
+}
+function save(){ try{ localStorage.setItem("deepend-v1", JSON.stringify(S)); }catch(e){ console.warn("save failed", e); } }
+
+/* ============ UTILS ============ */
+const $ = id => document.getElementById(id);
+const fmt1 = n => (Math.round(n*10)/10).toFixed(1);
+const fmt2 = n => (Math.round(n*100)/100).toFixed(2);
+function totalGallons(){ const p = S.profile;
+  return (Number(p.gallons)||0) + (p.combined==="yes" ? (Number(p.spaGallons)||0) : 0); }
+function areaSqFt(){ const p = S.profile;
+  if(Number(p.areaSqFt)>0) return Number(p.areaSqFt);
+  const g = totalGallons(), d = Number(p.avgDepth)||5;
+  return g>0 ? g/(7.48*d) : 0; }
+function daysBetween(a,b){ return Math.max(0,(b-a)/86400000); }
+function fmtDate(ts){ return new Date(ts).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}); }
+function lastEntry(){ return S.log.length ? S.log[S.log.length-1] : null; }
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function toast(msg){
+  const t = $("toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(()=>{ t.style.display = "none"; }, 2400);
+}
+function appConfirm(msg, onYes, yesLabel){
+  const m = $("app-modal"); $("app-modal-msg").textContent = msg;
+  const yes = $("app-modal-yes"); yes.textContent = yesLabel || "Confirm";
+  $("app-modal-no").onclick = ()=>{ m.style.display = "none"; };
+  yes.onclick = ()=>{ m.style.display = "none"; onYes(); };
+  m.style.display = "flex";
+}
+/* Generic edit modal. fields: [{key,label,type,value,step,options}]. onSave(values). */
+function appForm(title, fields, onSave){
+  const m = $("form-modal"); $("form-modal-title").textContent = title;
+  $("form-modal-body").innerHTML = fields.map(f=>{
+    if(f.type==="select"){
+      return '<label class="f">'+esc(f.label)+'</label><select id="fm-'+f.key+'">'+
+        f.options.map(o=>'<option value="'+esc(o.v)+'"'+(String(o.v)===String(f.value)?' selected':'')+'>'+esc(o.l)+'</option>').join("")+'</select>';
+    }
+    if(f.type==="textarea"){
+      return '<label class="f">'+esc(f.label)+'</label><textarea id="fm-'+f.key+'" rows="3">'+esc(f.value??"")+'</textarea>';
+    }
+    const t = f.type||"text";
+    return '<label class="f">'+esc(f.label)+'</label><input type="'+t+'" id="fm-'+f.key+'"'+
+      (f.step?' step="'+f.step+'"':'')+(t==="number"?' inputmode="decimal"':'')+' value="'+esc(f.value??"")+'">';
+  }).join("");
+  $("form-modal-cancel").onclick = ()=>{ m.style.display="none"; };
+  $("form-modal-save").onclick = ()=>{
+    const vals = {};
+    fields.forEach(f=>{ const el=$("fm-"+f.key); vals[f.key] = f.type==="number"? (el.value===""?null:Number(el.value)) : el.value; });
+    m.style.display="none"; onSave(vals);
+  };
+  m.style.display="flex";
+}
+
+/* Weight / volume formatting */
+function fmtLb(lb){
+  if(lb < 0.05) return "a trace";
+  if(lb < 1){ return Math.round(lb*16)+" oz"; }
+  const whole = Math.floor(lb), oz = Math.round((lb-whole)*16);
+  if(oz===0) return whole+" lb"; if(oz===16) return (whole+1)+" lb";
+  return whole+" lb "+oz+" oz";
+}
+function fmtFlOz(fl){
+  if(fl < 0.5) return "a splash";
+  if(fl < 8) return Math.round(fl)+" fl oz";
+  if(fl < 32){ const c = fl/8; return (Math.round(c*4)/4)+" cups ("+Math.round(fl)+" fl oz)"; }
+  if(fl < 128){ const q = fl/32; return (Math.round(q*4)/4)+" qt ("+Math.round(fl)+" fl oz)"; }
+  const g = fl/128; return (Math.round(g*10)/10)+" gal ("+Math.round(fl)+" fl oz)";
+}
+
+/* ============ CHEMISTRY ENGINE ============ */
+/* Temperature factor (Taylor watergram), linear interpolation, °F */
+const TF_TABLE = [[32,0.0],[37,0.1],[46,0.2],[53,0.3],[60,0.4],[66,0.5],[76,0.6],[84,0.7],[94,0.8],[105,0.9],[128,1.0]];
+function tempFactor(f){
+  if(f<=TF_TABLE[0][0]) return TF_TABLE[0][1];
+  for(let i=1;i<TF_TABLE.length;i++){
+    if(f<=TF_TABLE[i][0]){
+      const [x0,y0]=TF_TABLE[i-1],[x1,y1]=TF_TABLE[i];
+      return y0+(y1-y0)*(f-x0)/(x1-x0);
+    }
+  }
+  return TF_TABLE[TF_TABLE.length-1][1];
+}
+function tdsFactor(tds){
+  if(tds<=1000) return 12.10;
+  if(tds<=2000) return 12.20;
+  if(tds<=3000) return 12.29;
+  if(tds<=4000) return 12.35;
+  return 12.41;
+}
+function carbAlk(ta, cya){ return Math.max(5, ta - (cya||0)/3); }
+function estTDS(r){
+  const p=S.profile;
+  if(p.sanitizer==="salt" && r.salt) return Number(r.salt)+600; /* salt + typical background solids */
+  return 1000;
+}
+function computeLSI(r){
+  const ca = carbAlk(Number(r.ta), Number(r.cya));
+  const ch = Math.max(5, Number(r.ch));
+  const phVal = r.phOffScale ? 8.0 : Number(r.ph); /* phenol red maxes at 8.0; floor understates true risk */
+  const lsi = phVal + tempFactor(Number(r.temp)) + (Math.log10(ch)-0.4) + Math.log10(ca) - tdsFactor(estTDS(r));
+  return Math.round(lsi*100)/100;
+}
+function lsiStatus(lsi){
+  if(lsi < -0.3) return {cls:"bad", txt:"Corrosive — etching risk"};
+  if(lsi < -0.05) return {cls:"warn", txt:"Slightly corrosive"};
+  if(lsi <= 0.3) return {cls:"ok", txt:"Balanced"};
+  if(lsi <= 0.5) return {cls:"warn", txt:"Slightly scale-forming"};
+  return {cls:"bad", txt:"Scale-forming"};
+}
+
+/* Targets by profile */
+function targets(){
+  const p=S.profile, salt = p.sanitizer==="salt", plaster = p.surface==="plaster";
+  return {
+    ph:{lo:7.4, hi:7.6, ideal:7.5},
+    ta: salt ? {lo:60, hi:80, ideal:70} : {lo:80, hi:120, ideal:100},
+    ch: plaster ? {lo:250, hi:400, ideal:325} : {lo:175, hi:250, ideal:200},
+    cya: (function(){ const c = Number(p.cyaTarget)>0 ? Number(p.cyaTarget) : (salt?70:40);
+          return {lo:Math.max(0,c-10), hi:c+10, ideal:c}; })(),
+    salt:{ideal: Number(p.cellTarget)||3200, lo:(Number(p.cellTarget)||3200)-400, hi:(Number(p.cellTarget)||3200)+400},
+    lsi: plaster ? {lo:0, hi:0.3} : {lo:-0.3, hi:0.3}
+  };
+}
+
+/* ============ ACID-DEMAND (K-2006 R-0005) ============ */
+/* User-calibrated: each drop of R-0005 = a fixed oz of acid the user has verified for THIS pool
+   and THIS acid (Settings → Acid per demand drop, default 10 oz). Used exactly as entered —
+   no strength scaling — so it always matches the figure the user measured. If the user changes
+   acids, they re-verify and update this one number. Half-drops are linear. */
+function acidFromDrops(drops){
+  if(!(drops>0)) return null;
+  const ozPerDrop = Number(S.profile.ozPerDrop)>0 ? Number(S.profile.ozPerDrop) : 10;
+  return drops * ozPerDrop; /* fl oz of the user's acid, exactly as calibrated */
+}
+
+/* ============ PREDICTIVE FREE-CHLORINE MODEL ============ */
+/* Target FC derived from CYA (~5%), clamped to the user's floor/ceiling. */
+function fcTarget(){
+  const p = S.profile;
+  const cya = Number(p.cyaTarget)>0 ? Number(p.cyaTarget) : 50;
+  const derived = cya*0.05;
+  const lo = Number(p.fcMin)||2, hi = Number(p.fcMax)||5;
+  return Math.max(lo, Math.min(hi, Math.round(derived*10)/10));
+}
+/* Which season a given date falls in, honoring editable start months. */
+function seasonForDate(d){
+  const m = d.getMonth()+1, st = S.profile.seasonStarts||{spring:3,summer:6,fall:9,winter:12};
+  const order = [["spring",st.spring],["summer",st.summer],["fall",st.fall],["winter",st.winter]]
+    .sort((a,b)=>a[1]-b[1]);
+  let cur = order[order.length-1][0];
+  for(const [name,mon] of order){ if(m>=mon) cur = name; }
+  return cur;
+}
+function activeSeason(){ return seasonForDate(new Date()); }
+function seasonPreset(season){
+  const s = (S.profile.seasons||{})[season||activeSeason()];
+  return s || {hours:8, output:50};
+}
+/* Cell nameplate output (lb FC/day at 100%), adjusted by learned efficiency. */
+function cellRatedLbDay(){ const c = CELLS[S.profile.cell]||CELLS.t15; return c.lbday; }
+function cellEffFactor(){ const f = Number(S.profile.cellEffFactor); return (f>0.2 && f<2)? f : 1; }
+/* ppm FC added per day at given hours + output% for this pool volume.
+   Nameplate lb/day assumes a full ~24h generating day at 100%; scale linearly
+   by output% and by hours/24 so partial days read correctly. */
+function fcProducedPerDay(hours, outputPct){
+  const g = totalGallons(); if(!g) return 0;
+  const lbToday = cellRatedLbDay()*cellEffFactor()
+                 *(Number(outputPct)||0)/100
+                 *Math.min(24,(Number(hours)||0))/24;
+  /* 1 lb available chlorine ≈ 12,000 ppm·gal (i.e. 1 ppm per 12,000 gal per lb·... )
+     Using: ppm = lb * 120,000 / gallons  (1 lb FC ≈ 10 ppm in 12,000 gal) */
+  return lbToday * 120000 / g;
+}
+/* Learn per-day FC loss (temp-normalized) and effective cell output from history.
+   Uses consecutive sessions that carry FC + pump settings. Damped, not reactive. */
+function learnChlorine(){
+  const L = S.log.filter(e=>e.readings && e.readings.fc!=null && e.pump);
+  if(L.length<2) return null;
+  let lossSum=0, lossN=0, effSum=0, effN=0;
+  for(let i=1;i<L.length;i++){
+    const a=L[i-1], b=L[i];
+    const days = daysBetween(a.ts, b.ts); if(days<0.5||days>10) continue;
+    const produced = fcProducedPerDay(b.pump.hours, b.pump.output)*days; /* using nameplate eff=current */
+    const measuredDelta = Number(b.readings.fc) - Number(a.readings.fc);
+    const consumed = produced - measuredDelta; /* what demand ate over the interval */
+    let perDay = consumed/days;
+    /* discount bather-driven consumption so baseline isn't inflated */
+    const bl = b.bather||"none";
+    if(bl==="heavy") perDay *= 0.6; else if(bl==="moderate") perDay *= 0.8;
+    /* temp-normalize toward 84°F reference (demand ~ +3%/°F) */
+    const temp = Number(b.readings.temp)||84;
+    perDay = perDay / (1 + 0.03*(temp-84));
+    if(perDay>0 && perDay<8){ lossSum+=perDay; lossN++; }
+    /* effective-output signal: only when demand is small vs production (clear water) */
+    if(produced>0.5 && bl==="none"){
+      const impliedEff = (measuredDelta + perDay*days) / (fcProducedPerDay(b.pump.hours,b.pump.output)*days/cellEffFactor());
+      if(impliedEff>0.4 && impliedEff<1.6){ effSum+=impliedEff; effN++; }
+    }
+  }
+  return {
+    dailyLoss: lossN? lossSum/lossN : null,
+    effObserved: effN? effSum/effN : null,
+    samples: lossN
+  };
+}
+/* Recommend output% / hours to hold FC target, correcting gently. */
+function chlorineAdvice(latest){
+  const p = S.profile;
+  if(p.sanitizer!=="salt") return null;
+  const season = activeSeason();
+  const preset = seasonPreset(season);
+  const curHours = (latest && latest.pump && latest.pump.hours) || preset.hours;
+  const curOutput = (latest && latest.pump && latest.pump.output) || preset.output;
+  const learned = learnChlorine();
+  const tgt = fcTarget();
+  const curFC = latest && latest.readings && latest.readings.fc!=null ? Number(latest.readings.fc) : null;
+  /* demand estimate: learned loss if we have it, else a CYA/temp heuristic */
+  let demand = learned && learned.dailyLoss!=null ? learned.dailyLoss : null;
+  if(demand==null){
+    const temp = (latest&&latest.readings&&latest.readings.temp)||84;
+    demand = Math.max(0.5, 2.5*(1+0.03*(temp-84))); /* rough ppm/day */
+  }
+  /* production needed per day = demand + gentle correction toward target */
+  let correction = 0;
+  if(curFC!=null){
+    const gap = tgt - curFC;               /* +ve means we're low */
+    correction = gap * 0.35;               /* damped: close a third of the gap/day */
+  }
+  const neededPerDay = Math.max(0, demand + correction);
+  /* solve output% at current hours */
+  const perDayAtFull = fcProducedPerDay(curHours, 100);
+  let recOutput = perDayAtFull>0 ? Math.round(neededPerDay/perDayAtFull*100) : curOutput;
+  let recHours = curHours, note = "";
+  if(recOutput>100){
+    /* near the rail — add hours instead of impossible output */
+    recOutput = 100;
+    const perDayAt100PerHour = fcProducedPerDay(1,100);
+    recHours = perDayAt100PerHour>0 ? Math.min(24, Math.ceil(neededPerDay/perDayAt100PerHour)) : curHours;
+    note = "Output maxed — added run-hours to keep up.";
+  } else if(recOutput<15){
+    recOutput = Math.max(10, recOutput);
+    note = "Demand is low — trimming output.";
+  }
+  return {
+    season, seasonName:SEASON_NAMES[season],
+    target:tgt, curFC, demand:Math.round(demand*100)/100,
+    curHours, curOutput, recHours, recOutput,
+    effObserved: learned&&learned.effObserved,
+    samples: learned?learned.samples:0, note
+  };
+}
+/* ============ DOSING ENGINE (per total gallons) ============ */
+function buildPlan(r){
+  const g = totalGallons(); if(!g) return [];
+  const k = g/10000, t = targets(), sh = S.shelf, plan = [];
+  const ta=Number(r.ta), ph=Number(r.ph), ch=Number(r.ch), cya=Number(r.cya), salt=Number(r.salt||0);
+  const acidStr = Number(sh.acid.strength)||31.45;
+  const acidMult = 31.45/acidStr; /* weaker acid -> more volume */
+
+  /* Solve the pH target from the LSI equation using post-treatment water */
+  const taF = (ta < t.ta.lo || ta > t.ta.hi) ? t.ta.ideal : ta;
+  const chF = ch < t.ch.lo ? t.ch.ideal : ch;
+  const cyaF = cya < t.cya.lo ? t.cya.ideal : cya;
+  const lsiT = (t.lsi.lo + t.lsi.hi)/2;
+  let phT = lsiT - tempFactor(Number(r.temp)) - (Math.log10(Math.max(5,chF))-0.4)
+            - Math.log10(carbAlk(taF, cyaF)) + tdsFactor(estTDS(r));
+  phT = Math.round(Math.max(7.2, Math.min(7.8, phT))*10)/10;
+  let acidForTA = false;
+
+  /* 1. Alkalinity first — it steers everything else */
+  if(ta < t.ta.lo){
+    const d = t.ta.ideal - ta;
+    plan.push({chem:"bicarb", product:sh.bicarb.label,
+      amount:fmtLb(d/10*1.4*k), raw:d,
+      why:"Raise TA "+ta+" → "+t.ta.ideal+" ppm",
+      how:"Broadcast over the deep end with the pump running.",
+      wait:"Circulate 4–6 hours before retesting pH."});
+  } else if(ta > t.ta.hi){
+    const d = ta - t.ta.ideal; acidForTA = true;
+    plan.push({chem:"acid", product:sh.acid.label+" ("+acidStr+"%)",
+      amount:fmtFlOz(d/10*25.6*k*acidMult), raw:-d,
+      why:"Lower TA "+ta+" → "+t.ta.ideal+" ppm (this dose pulls pH down too)",
+      how:"Pour slowly into the deep end away from fittings, pump running. Then aerate (waterfall, jets, return pointed up) to rebound pH toward "+fmt1(phT)+" without rebuilding TA.",
+      wait:"Retest pH after 30–60 min of circulation; repeat in stages. Don't add separate pH acid today."});
+  }
+
+  /* 2. pH — steered by the LSI equation, not a fixed number.
+     When pH was off-scale, the acid-demand drops (shown separately) are the governing dose,
+     so skip the pH-estimate acid step to avoid a redundant second number. */
+  if(r.phOffScale && r.acidDrops>0){
+    /* drops drive the acid dose; no pH-estimate step */
+  } else if(ph > phT + 0.1 && !acidForTA){
+    const d = ph - phT;
+    plan.push({chem:"acid", product:sh.acid.label+" ("+acidStr+"%)",
+      amount:fmtFlOz(d/0.2*26*(Math.max(ta,50)/100)*k*acidMult), raw:-d,
+      why:"Lower pH "+fmt1(ph)+" → "+fmt1(phT)+" (lands LSI near "+(lsiT>0?"+":"")+fmt2(lsiT)+")",
+      how:"Pour slowly into the deep end with the pump running. Never mix with chlorine.",
+      wait:"Retest after 30 min of circulation."});
+  } else if(ph < phT - 0.1){
+    const d = phT - ph;
+    plan.push({chem:"phup", product:sh.phup.label,
+      amount:(Math.round(d/0.2*6*(Math.max(ta,50)/100)*k))+" oz by weight", raw:d,
+      why:"Raise pH "+fmt1(ph)+" → "+fmt1(phT)+" (lands LSI near "+(lsiT>0?"+":"")+fmt2(lsiT)+")",
+      how:"Pre-dissolve in a bucket of pool water, pour around the perimeter.",
+      wait:"Retest after 1 hour. Note: soda ash also nudges TA up."});
+  }
+
+  /* 3. Calcium */
+  if(ch < t.ch.lo){
+    const d = t.ch.ideal - ch;
+    const per10 = (Number(sh.calcium.strength)||77) >= 90 ? 1.0 : 1.25;
+    plan.push({chem:"calcium", product:sh.calcium.label+" ("+(sh.calcium.strength||77)+"%)",
+      amount:fmtLb(d/10*per10*k), raw:d,
+      why:"Raise CH "+ch+" → "+t.ch.ideal+" ppm",
+      how:"Dissolve in a bucket (it gets hot — add product to water, never water to product), pour around the pool. Don't add within 4 hours of bicarb.",
+      wait:"Wait 2–4 hours before other additions."});
+  } else if(ch > t.ch.hi){
+    plan.push({chem:"note", product:"Calcium high ("+ch+" ppm)",
+      amount:"No product lowers CH", raw:0,
+      why:"Only dilution helps — partial drain/refill, or lean on rain dilution.",
+      how:"Meanwhile the app compensates by steering pH/TA to keep LSI in band.", wait:""});
+  }
+
+  /* 4. CYA */
+  if(cya < t.cya.lo){
+    const d = t.cya.ideal - cya;
+    plan.push({chem:"cya", product:sh.cya.label,
+      amount:(Math.round(d/10*13*k))+" oz by weight", raw:d,
+      why:"Raise CYA "+cya+" → "+t.cya.ideal+" ppm",
+      how:"Put granules in a sock hung in front of a return jet; squeeze occasionally. Dissolves over ~24 h.",
+      wait:"Don't retest CYA for 3–4 days — it reads low until fully dissolved."});
+  } else if(cya > t.cya.hi + 20){
+    plan.push({chem:"note", product:"CYA high ("+cya+" ppm)",
+      amount:"Dilution only", raw:0,
+      why:"High CYA suppresses chlorine effectiveness and inflates TA readings.",
+      how:"Plan a partial drain/refill or let rain dilution work on it.", wait:""});
+  }
+
+  /* 5. Salt */
+  if(S.profile.sanitizer==="salt" && salt){
+    if(salt < t.salt.lo){
+      const d = t.salt.ideal - salt;
+      plan.push({chem:"salt", product:sh.salt.label,
+        amount:fmtLb(d/11.98*k*1) , raw:d,
+        why:"Raise salt "+salt+" → "+t.salt.ideal+" ppm",
+        how:"Broadcast bags into the shallow end, brush to dissolve. Add last, after other chems.",
+        wait:"Run the pump 24 h before trusting the cell's salt reading."});
+    } else if(salt > t.salt.hi + 400){
+      plan.push({chem:"note", product:"Salt high ("+salt+" ppm)", amount:"Dilution only", raw:0,
+        why:"Above the cell's happy range.", how:"Partial drain/refill or rain dilution.", wait:""});
+    }
+  }
+  /* sequence numbers */
+  let n=1; plan.forEach(x=>{ if(x.chem!=="note") x.seq=n++; });
+  return plan;
+}
+
+/* For every parameter, explain why nothing (or only a note) was recommended.
+   Mirrors buildPlan's branches so the "why not" always matches the "what". */
+function holdReasons(r){
+  const t = targets(), out = [];
+  const ta=Number(r.ta), ph=Number(r.ph), ch=Number(r.ch), cya=Number(r.cya), salt=Number(r.salt||0);
+  // recompute the same LSI-solved pH target buildPlan used
+  const taF = (ta < t.ta.lo || ta > t.ta.hi) ? t.ta.ideal : ta;
+  const chF = ch < t.ch.lo ? t.ch.ideal : ch;
+  const cyaF = cya < t.cya.lo ? t.cya.ideal : cya;
+  const lsiT = (t.lsi.lo + t.lsi.hi)/2;
+  let phT = lsiT - tempFactor(Number(r.temp)) - (Math.log10(Math.max(5,chF))-0.4)
+            - Math.log10(carbAlk(taF, cyaF)) + tdsFactor(estTDS(r));
+  phT = Math.round(Math.max(7.2, Math.min(7.8, phT))*10)/10;
+  const taHigh = ta > t.ta.hi;
+
+  // TA — only explain when NOT dosed (in band)
+  if(ta >= t.ta.lo && ta <= t.ta.hi){
+    out.push({p:"Alkalinity", txt:"TA "+ta+" is in the "+t.ta.lo+"–"+t.ta.hi+" band — no bicarbonate or acid needed for it."});
+  }
+
+  // pH — the confusing one. Explain the LSI-solved target.
+  let phExplained = false;
+  if(r.phOffScale){
+    // handled by off-scale flow elsewhere; note it here for completeness
+    out.push({p:"pH", txt:"Off the scale (>8.0) — acid dose comes from your demand drops above, not a pH estimate."});
+    phExplained = true;
+  } else if(taHigh){
+    out.push({p:"pH", txt:"No separate pH acid: the alkalinity-lowering acid above also pulls pH down toward "+fmt1(phT)+". Adding more would overshoot."});
+    phExplained = true;
+  } else if(ph >= phT - 0.1 && ph <= phT + 0.1){
+    out.push({p:"pH", txt:"pH "+fmt1(ph)+" is at its LSI target ("+fmt1(phT)+") for your current calcium, alkalinity and temperature — the app aims pH at balanced water, not a fixed 7.5, so no acid or base is needed."+(ph>7.6?" It looks high by the usual 7.4–7.6 rule, but it's balanced where it is.":"")});
+    phExplained = true;
+  } else if(ph > phT + 0.1){
+    // acid WAS recommended — no hold reason
+  } else {
+    // base WAS recommended — no hold reason
+  }
+  // Only add the standalone "looks high" note if pH wasn't already explained above
+  if(!phExplained && !r.phOffScale && !taHigh && ph > 7.6 && ph <= phT + 0.1){
+    out.push({p:"pH note", txt:"pH "+fmt1(ph)+" looks high by the usual 7.4–7.6 rule, but with your calcium/alkalinity the balanced target is "+fmt1(phT)+", so it's fine where it is."});
+  }
+
+  // Calcium
+  if(ch >= t.ch.lo && ch <= t.ch.hi){
+    out.push({p:"Calcium", txt:"CH "+ch+" is within "+t.ch.lo+"–"+t.ch.hi+" — no calcium chloride needed."});
+  } else if(ch > t.ch.hi){
+    out.push({p:"Calcium", txt:"CH "+ch+" is high, but nothing lowers calcium except dilution (partial drain/refill or rain). The app steers pH/TA to keep LSI balanced meanwhile."});
+  }
+
+  // CYA
+  if(cya >= t.cya.lo && cya <= t.cya.hi){
+    out.push({p:"CYA", txt:"CYA "+cya+" is in the "+t.cya.lo+"–"+t.cya.hi+" band — no stabilizer needed."});
+  } else if(cya > t.cya.hi && cya <= t.cya.hi + 20){
+    out.push({p:"CYA", txt:"CYA "+cya+" is a little high but not enough to act on — only dilution reduces it, so it's left alone for now."});
+  } else if(cya > t.cya.hi + 20){
+    out.push({p:"CYA", txt:"CYA "+cya+" is high; only dilution reduces it. Flagged above rather than dosed."});
+  }
+
+  // Salt
+  if(S.profile.sanitizer==="salt" && salt){
+    if(salt >= t.salt.lo && salt <= t.salt.hi){
+      out.push({p:"Salt", txt:"Salt "+salt+" is inside your "+t.salt.lo+"–"+t.salt.hi+" band (target "+t.salt.ideal+"). Adding for a small gap risks overshoot, and you can't remove salt except by dilution — so it's held."});
+    } else if(salt > t.salt.hi && salt <= t.salt.hi + 400){
+      out.push({p:"Salt", txt:"Salt "+salt+" is slightly above target but within the cell's tolerance — not worth diluting yet."});
+    } else if(salt > t.salt.hi + 400){
+      out.push({p:"Salt", txt:"Salt "+salt+" is high for the cell; only dilution lowers it. Flagged above."});
+    }
+  }
+
+  return out;
+}
+/* ============ TEST WIZARD ============ */
+const KIT_STEPS = {
+  k2006:{temp:1, salt:100, ph:0.1, ta:10, ch:10, cya:5, fc:0.2},
+  basic:{temp:1, salt:200, ph:0.2, ta:10, ch:25, cya:10, fc:0.5},
+  strips:{temp:1, salt:200, ph:0.2, ta:40, ch:50, cya:30, fc:0.5},
+  digital:{temp:1, salt:10, ph:0.01, ta:1, ch:1, cya:1, fc:0.1}
+};
+const KIT_TIPS = {
+  k2006:{
+    ph:"K-2006: fill to 44 mL, 5 drops R-0004, match the comparator in natural light.",
+    ta:"K-2006: 25 mL sample, 2 drops R-0007, 5 drops R-0008, titrate R-0009. Drops × 10 = TA.",
+    ch:"K-2006: 25 mL sample, 20 drops R-0010, 5 drops R-0011, titrate R-0012. Drops × 10 = CH.",
+    cya:"K-2006: mix R-0013 1:1, pour into view tube until the dot disappears.",
+    salt:"Use your salt cell readout or a K-1766 drop test.",
+    fc:"K-2006: 10 mL sample, 2 dippers R-0870 (turns pink), titrate R-0871 drop by drop to clear. Drops × 0.5 = FC ppm. (Use a 25 mL sample for finer 0.2 ppm/drop resolution.)",
+    temp:"Pool thermometer or equipment panel reading."
+  }
+};
+let wiz = null;
+function wizStepList(){
+  const steps = ["temp"];
+  if(S.profile.sanitizer==="salt") steps.push("salt");
+  steps.push("ph","ta","ch","cya");
+  if(S.profile.sanitizer==="salt") steps.push("fc","equip");
+  steps.push("review");
+  return steps;
+}
+const STEP_META = {
+  temp:{name:"Water temperature", unit:"°F", key:"temp"},
+  salt:{name:"Salinity", unit:"ppm", key:"salt"},
+  ph:{name:"pH", unit:"", key:"ph"},
+  ta:{name:"Total alkalinity", unit:"ppm", key:"ta"},
+  ch:{name:"Calcium hardness", unit:"ppm", key:"ch"},
+  cya:{name:"Cyanuric acid", unit:"ppm", key:"cya"},
+  fc:{name:"Free chlorine", unit:"ppm", key:"fc"}
+};
+function startWizard(){
+  if(!totalGallons()){ showView("settings"); toast("Set your pool gallons here first."); return; }
+  const last = lastEntry();
+  wiz = {i:0, steps:wizStepList(), r:{}, prev:last?last.readings:{}};
+  showView("test"); renderWiz();
+}
+function renderWiz(){
+  const stepsEl = $("wiz-steps");
+  stepsEl.innerHTML = wiz.steps.map((s,i)=>'<i class="'+(i<wiz.i?"done":"")+'"></i>').join("");
+  const s = wiz.steps[wiz.i], body = $("wiz-body");
+  if(s==="review"){ renderReview(); return; }
+  if(s==="equip"){ renderEquipStep(); return; }
+  const m = STEP_META[s], t = targets(), kit = KIT_STEPS[S.profile.kit]||KIT_STEPS.k2006;
+  const tgt = t[s] ? "Target: "+(t[s].lo!==undefined? t[s].lo+"–"+t[s].hi : t[s].ideal)+" "+m.unit : "";
+  const prev = wiz.prev[s] !== undefined ? '<div class="target">Last time: '+wiz.prev[s]+' '+m.unit+'</div>' : "";
+  const tip = (KIT_TIPS[S.profile.kit]||KIT_TIPS.k2006||{})[s];
+  if(s==="ph"){ renderPhStep(m, t, kit, tgt, prev, tip); return; }
+  // CH/TA/CYA move slowly — offer to reuse the last recorded value if one exists
+  const skippable = (s==="ch"||s==="ta"||s==="cya");
+  const priorVal = skippable ? lastRecorded(s) : null;
+  const skipBlock = (skippable && priorVal!=null) ?
+    '<div class="hint" style="margin-top:10px"><b>Don\'t retest every time?</b> '+m.name+' moves slowly. '+
+    'You can reuse your last recorded value ('+priorVal.value+' '+m.unit+' from '+fmtDate(priorVal.ts)+').'+
+    '<div class="btnrow" style="margin-top:8px"><button class="btn quiet sm" onclick="useLastValue(\''+s+'\')">Use last recorded ('+priorVal.value+')</button></div></div>'
+    : "";
+  body.innerHTML =
+    '<h2>'+ (wiz.i+1) +'. '+m.name+'</h2>'+
+    '<label class="f">Reading '+(m.unit?'('+m.unit+')':'')+'</label>'+
+    '<input type="number" id="wiz-input" step="'+kit[s]+'" inputmode="decimal" value="'+(wiz.r[s]??wiz.prev[s]??"")+'">'+
+    '<div class="target">'+tgt+'</div>'+ prev +
+    (tip ? '<div class="hint"><b>How to read it:</b> '+tip+'</div>' : "")+
+    skipBlock +
+    '<div class="btnrow">'+
+      (wiz.i>0 ? '<button class="btn quiet" onclick="wizBack()">Back</button>' : '<button class="btn quiet" onclick="cancelWizard()">Cancel</button>')+
+      '<button class="btn primary" onclick="wizNext()">Next</button></div>';
+  setTimeout(()=>{ const el=$("wiz-input"); if(el) el.focus(); }, 60);
+}
+/* Most recent logged value for a slow-moving parameter, with its date. Null if never recorded. */
+function lastRecorded(key){
+  for(let i=S.log.length-1;i>=0;i--){
+    const v = S.log[i].readings ? S.log[i].readings[key] : undefined;
+    if(v!==undefined && v!==null && v!=="") return {value:v, ts:S.log[i].ts};
+  }
+  return null;
+}
+/* Timestamp of the last session where this param was FRESHLY measured (not carried). Null if none. */
+function lastFreshMeasure(key){
+  for(let i=S.log.length-1;i>=0;i--){
+    const e = S.log[i];
+    const v = e.readings ? e.readings[key] : undefined;
+    const carried = e.carried && e.carried[key];
+    if(v!==undefined && v!==null && v!=="" && !carried) return e.ts;
+  }
+  return null;
+}
+/* Carry a slow-moving value forward from the last record, flagged as not freshly tested. */
+function useLastValue(s){
+  const prior = lastRecorded(s);
+  if(prior==null){ toast("No previous reading to use."); return; }
+  wiz.r[s] = prior.value;
+  if(!wiz.carried) wiz.carried = {};
+  wiz.carried[s] = prior.ts;   // remember it was reused, and from when
+  wiz.i++; renderWiz();
+}
+function wizBack(){ wiz.i--; renderWiz(); }
+function renderPhStep(m, t, kit, tgt, prev, tip){
+  const off = !!wiz.r.phOffScale;
+  const normalFields =
+    '<label class="f">pH reading</label>'+
+    '<input type="number" id="wiz-input" step="'+kit.ph+'" inputmode="decimal" value="'+(wiz.r.ph??wiz.prev.ph??"")+'">'+
+    '<div class="target">'+tgt+'</div>'+ prev +
+    (tip ? '<div class="hint"><b>How to read it:</b> '+tip+'</div>' : "")+
+    '<hr class="soft"><label class="f">Acid-demand drops (optional)</label>'+
+    '<div class="muted small">Ran the R-0005 acid-demand test? Enter drops to target (half-drops OK) for a precise dose.</div>'+
+    '<input type="number" id="wiz-drops" step="0.5" inputmode="decimal" placeholder="e.g. 4.5" value="'+(wiz.r.acidDrops??"")+'">';
+  const offFields =
+    '<div class="hint"><b>Off the scale.</b> Phenol red can\'t read above 8.0. Run the R-0005 acid-demand test: add drops until the sample drops into readable range, then enter the drop count and the pH you landed on.</div>'+
+    '<label class="f">Acid-demand drops (R-0005)</label>'+
+    '<input type="number" id="wiz-drops" step="0.5" inputmode="decimal" placeholder="e.g. 6.5" value="'+(wiz.r.acidDrops??"")+'">'+
+    '<label class="f">Resulting pH after titrating</label>'+
+    '<input type="number" id="wiz-resultph" step="'+kit.ph+'" inputmode="decimal" placeholder="e.g. 7.5" value="'+(wiz.r.resultPh??"")+'">'+
+    '<div class="muted small">This confirms your endpoint. The session logs pre-dose pH as \\u22658.0 so your history reflects the real scaling risk.</div>';
+  $("wiz-body").innerHTML =
+    '<h2>'+ (wiz.i+1) +'. pH</h2>'+
+    '<label class="f" style="display:flex;align-items:center;gap:10px;justify-content:space-between">'+
+      '<span>pH is off the scale (&gt;8.0)</span>'+
+      '<input type="checkbox" id="ph-offscale" '+(off?'checked':'')+' style="width:22px;height:22px;accent-color:var(--water)"></label>'+
+    '<div id="ph-fields">'+(off?offFields:normalFields)+'</div>'+
+    '<div class="btnrow">'+
+      (wiz.i>0 ? '<button class="btn quiet" onclick="wizBack()">Back</button>' : '<button class="btn quiet" onclick="cancelWizard()">Cancel</button>')+
+      '<button class="btn primary" onclick="phNext()">Next</button></div>';
+  $("ph-offscale").onchange = (e)=>{
+    // preserve any typed drops across the toggle
+    const dEl=$("wiz-drops"); if(dEl){ const dv=parseFloat(dEl.value); wiz.r.acidDrops = isNaN(dv)?null:dv; }
+    wiz.r.phOffScale = e.target.checked;
+    renderPhStep(m, t, kit, tgt, prev, tip);
+  };
+  setTimeout(()=>{ const el=$(off?"wiz-drops":"wiz-input"); if(el) el.focus(); }, 60);
+}
+function phNext(){
+  if(wiz.r.phOffScale){
+    const drops = parseFloat($("wiz-drops").value);
+    const rph = parseFloat($("wiz-resultph").value);
+    if(isNaN(drops)){ toast("Enter your acid-demand drops."); return; }
+    if(isNaN(rph)){ toast("Enter the pH you titrated down to."); return; }
+    if(rph>8.0){ toast("Resulting pH should be 8.0 or below — keep titrating."); return; }
+    wiz.r.acidDrops = drops;
+    wiz.r.resultPh = rph;
+    wiz.r.ph = 8.0;          /* logged pre-dose floor; flagged off-scale */
+    wiz.i++; renderWiz();
+    return;
+  }
+  // normal path
+  const v = parseFloat($("wiz-input").value);
+  if(isNaN(v)){ toast("Enter a reading first."); return; }
+  const commit = ()=>{
+    wiz.r.ph = v; wiz.r.phOffScale = false; wiz.r.resultPh = null;
+    const dv = parseFloat($("wiz-drops").value); wiz.r.acidDrops = isNaN(dv)? null : dv;
+    wiz.i++; renderWiz();
+  };
+  if(v<6.2||v>8.8){ appConfirm(v+" looks out of range (6.2–8.8) for pH. Keep it, or use the off-scale toggle above?", commit, "Keep it"); return; }
+  commit();
+}
+function wizNext(){
+  const s = wiz.steps[wiz.i], v = parseFloat($("wiz-input").value);
+  if(isNaN(v)){ toast("Enter a reading first."); return; }
+  const ranges = {temp:[40,110], salt:[0,7000], ph:[6.2,8.8], ta:[0,400], ch:[0,1200], cya:[0,300], fc:[0,15]};
+  const rr = ranges[s];
+  const commit = ()=>{
+    wiz.r[s]=v;
+    if(wiz.carried && wiz.carried[s]) delete wiz.carried[s]; // freshly entered = no longer carried
+    wiz.i++; renderWiz();
+  };
+  if(v<rr[0]||v>rr[1]){ appConfirm(v+" looks out of range ("+rr[0]+"–"+rr[1]+") for this reading. Keep it?", commit, "Keep it"); return; }
+  commit();
+}
+function renderEquipStep(){
+  const season = activeSeason(), preset = seasonPreset(season);
+  const eq = wiz.equip || {hours: preset.hours, output: preset.output, bather:"none"};
+  wiz.equip = eq;
+  $("wiz-body").innerHTML =
+    '<h2>'+(wiz.i+1)+'. Equipment &amp; use</h2>'+
+    '<div class="muted small">Pre-filled from your '+SEASON_NAMES[season]+' preset. Adjust if you\'ve changed a setting.</div>'+
+    '<div class="row2"><div><label class="f">Pump run (hrs/day)</label>'+
+    '<input type="number" id="eq-hours" step="0.5" inputmode="decimal" value="'+eq.hours+'"></div>'+
+    '<div><label class="f">Cell output (%)</label>'+
+    '<input type="number" id="eq-output" step="5" inputmode="numeric" value="'+eq.output+'"></div></div>'+
+    '<label class="f">Bather load since last test</label>'+
+    '<div class="seg" id="eq-bather">'+
+      ['none','moderate','heavy'].map(b=>'<button data-v="'+b+'"'+(eq.bather===b?' class="on"':'')+'>'+
+        (b==="none"?"Normal":b[0].toUpperCase()+b.slice(1))+'</button>').join("")+
+    '</div>'+
+    '<div class="btnrow"><button class="btn quiet" onclick="equipBack()">Back</button>'+
+    '<button class="btn primary" onclick="equipNext()">Next</button></div>';
+  const seg = $("eq-bather");
+  seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{
+    wiz.equip.bather=b.dataset.v; seg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
+  });
+}
+function equipBack(){ wiz.i--; renderWiz(); }
+function equipNext(){
+  wiz.equip.hours = Number($("eq-hours").value)||0;
+  wiz.equip.output = Number($("eq-output").value)||0;
+  wiz.i++; renderWiz();
+}
+function renderReview(){
+  const r = wiz.r, lsi = computeLSI(r), st = lsiStatus(lsi), plan = buildPlan(r);
+  wiz.plan = plan; wiz.lsi = lsi;
+  const doses = plan.length ? plan.map((d,i)=>
+    '<div class="dose">'+
+      (d.seq?('<span class="seqn">Step '+d.seq+'</span>'):"")+'<b>'+esc(d.product)+'</b>'+
+      '<div class="amt">'+esc(d.amount)+'</div>'+
+      '<div class="why">'+esc(d.why)+'</div>'+
+      '<div class="small" style="margin-top:6px">'+esc(d.how)+'</div>'+
+      (d.wait?('<div class="wait">⏱ '+esc(d.wait)+'</div>'):"")+
+      (d.chem!=="note"?('<label class="ck"><input type="checkbox" id="dose-ck-'+i+'" checked> I added this</label>'):"")+
+    '</div>').join("")
+    : '<div class="hint"><b>Nothing to add.</b> Water is in range — log the test and enjoy the pool.</div>';
+  const ca = carbAlk(r.ta, r.cya);
+  const offScale = !!r.phOffScale;
+
+  /* acid-demand comparison block */
+  let acidBlock = "";
+  if(r.acidDrops>0){
+    const flDrops = acidFromDrops(r.acidDrops);
+    const acidEst = plan.find(d=>d.chem==="acid");
+    acidBlock = '<div class="dose" style="border-color:var(--water)">'+
+      '<span class="chip info">Acid demand · primary</span>'+
+      '<div class="amt" style="margin-top:6px">'+Math.round(flDrops)+' fl oz</div>'+
+      '<div class="why">From '+r.acidDrops+' drop'+(r.acidDrops===1?"":"s")+' of R-0005 in '+esc(S.shelf.acid.label)+' ('+(Number(S.shelf.acid.strength)||31.45)+'%)'+
+        (offScale? ' · pH was off-scale (>8.0), titrated to '+fmt1(r.resultPh)+'':'')+'</div>'+
+      (acidEst && !offScale? '<div class="small muted" style="margin-top:6px">pH-based estimate for comparison: '+esc(acidEst.amount)+'</div>':'')+
+      '</div>';
+  }
+
+  /* chlorine advice block */
+  let clBlock = "";
+  if(S.profile.sanitizer==="salt" && wiz.equip){
+    const latest = {ts:Date.now(), readings:r, pump:{hours:wiz.equip.hours, output:wiz.equip.output}, bather:wiz.equip.bather};
+    const adv = chlorineAdvice(latest);
+    if(adv){
+      const outMove = adv.recOutput!==adv.curOutput, hrMove = adv.recHours!==adv.curHours;
+      const fcLine = adv.curFC!=null ? 'FC '+fmt1(adv.curFC)+' → target '+fmt1(adv.target)+' ppm' : 'Target FC '+fmt1(adv.target)+' ppm';
+      clBlock = '<hr class="soft"><h3>Chlorine plan</h3>'+
+        '<div class="muted small">'+fcLine+' · est. demand '+adv.demand+' ppm/day'+(adv.samples? ' (learned from '+adv.samples+' interval'+(adv.samples===1?"":"s")+')':' (initial estimate)')+'</div>'+
+        '<div class="rgrid" style="margin-top:8px">'+
+          '<div class="rcell"><div class="lab">Output %</div><div class="val">'+adv.curOutput+' → '+adv.recOutput+'</div></div>'+
+          '<div class="rcell"><div class="lab">Run hrs</div><div class="val">'+adv.curHours+' → '+adv.recHours+'</div></div>'+
+        '</div>'+
+        (outMove||hrMove
+          ? '<div class="hint" style="margin-top:8px"><b>Suggested:</b> '+
+            (outMove? 'set cell output to <b>'+adv.recOutput+'%</b>':'')+
+            (outMove&&hrMove? ' and ':'')+
+            (hrMove? 'run the pump <b>'+adv.recHours+' hrs/day</b>':'')+
+            '. '+esc(adv.note||"Small nudge — it corrects gradually to avoid overshoot.")+'</div>'
+          : '<div class="chip ok" style="margin-top:8px">Settings look right — hold steady.</div>')+
+        (adv.effObserved? '<div class="muted small" style="margin-top:6px">Observed cell efficiency ~'+Math.round(adv.effObserved*100)+'% of nameplate.</div>':'');
+    }
+  }
+
+  const holds = holdReasons(r);
+  const holdBlock = holds.length ?
+    '<details class="lentry" style="margin-top:12px"><summary><span class="d">Why nothing else?</span><span class="muted small">tap</span></summary>'+
+    '<div class="body">'+holds.map(h=>'<div class="small" style="margin-top:5px">• <b>'+esc(h.p)+':</b> '+esc(h.txt)+'</div>').join("")+'</div></details>'
+    : "";
+  // Carried-over note: which slow-moving values were reused rather than freshly tested
+  const carriedKeys = wiz.carried ? Object.keys(wiz.carried) : [];
+  const carryBlock = carriedKeys.length ?
+    '<div class="warnbar warn" style="margin-top:10px">Carried over (not tested today): '+
+    carriedKeys.map(k=>(STEP_META[k]?STEP_META[k].name:k)+' '+r[k]+' (from '+fmtDate(wiz.carried[k])+')').join(' · ')+
+    '</div>' : "";
+
+  $("wiz-body").innerHTML =
+    '<h2>Results &amp; plan</h2>'+
+    '<div class="lsi-read"><span class="num">'+(offScale?"\u2265":"")+(lsi>0?"+":"")+fmt2(lsi)+'</span><span class="chip '+st.cls+'">'+st.txt+'</span></div>'+
+    (offScale? '<div class="warnbar warn" style="margin-top:8px">pH was above 8.0 — LSI shown is the <b>minimum</b>; true scaling risk is higher until you add the acid below.</div>':'')+
+    carryBlock +
+    '<div class="muted small">Carbonate alkalinity used for LSI: '+Math.round(ca)+' ppm (TA '+r.ta+' − CYA '+(r.cya||0)+'/3)'+
+    (offScale? ' · pH floored at 8.0':'')+
+    (S.profile.sanitizer==="salt"?' · est. TDS '+estTDS(r)+' ppm':'')+'</div>'+
+    '<h3>Treatment sequence</h3>'+
+    '<div class="muted small">Follow the numbered order. Add one product at a time — never mix acid and chlorine, and keep the pump running throughout.</div>'+
+    acidBlock + doses + clBlock + holdBlock +
+    '<label class="f">Notes (optional)</label><textarea id="wiz-notes" rows="2"></textarea>'+
+    '<div class="btnrow"><button class="btn quiet" onclick="wizBack()">Back</button>'+
+    '<button class="btn primary" onclick="logTreatment()">Log this session</button></div>'+
+    '<div class="btnrow" style="margin-top:6px"><button class="btn danger" onclick="cancelWizard()">Cancel without saving</button></div>';
+}
+function cancelWizard(){
+  appConfirm("Discard this test session without saving? Your readings won't be logged.", ()=>{
+    wiz = null; showView("dash"); toast("Session discarded.");
+  }, "Discard");
+}
+function logTreatment(){
+  const doses = (wiz.plan||[]).filter(d=>d.chem!=="note").map((d)=>{
+    const idx = wiz.plan.indexOf(d);
+    const ck = $("dose-ck-"+idx);
+    return {chem:d.chem, product:d.product, amount:d.amount, added: ck?ck.checked:true};
+  });
+  const entry = {ts:Date.now(), readings:wiz.r, lsi:wiz.lsi, doses, notes:($("wiz-notes")?$("wiz-notes").value:"")};
+  entry.holds = holdReasons(wiz.r);
+  if(wiz.carried && Object.keys(wiz.carried).length) entry.carried = Object.assign({}, wiz.carried);
+  if(S.profile.sanitizer==="salt" && wiz.equip){
+    entry.pump = {hours:wiz.equip.hours, output:wiz.equip.output};
+    entry.bather = wiz.equip.bather||"none";
+  }
+  S.log.push(entry);
+  save(); wiz=null; showView("dash");
+}
+
+/* ============ WEATHER + PROJECTIONS ============ */
+let weatherCache = null;
+async function fetchWeather(sinceTs){
+  const p = S.profile;
+  if(!p.lat || !p.lon) return null;
+  const days = Math.min(92, Math.max(1, Math.ceil(daysBetween(sinceTs, Date.now()))));
+  const key = p.lat+","+p.lon+","+days+","+new Date().toDateString();
+  if(weatherCache && weatherCache.key===key) return weatherCache.data;
+  try{
+    const url = "https://api.open-meteo.com/v1/forecast?latitude="+p.lat+"&longitude="+p.lon+
+      "&daily=precipitation_sum,et0_fao_evapotranspiration&past_days="+days+"&forecast_days=1&precipitation_unit=inch&timezone=auto";
+    const res = await fetch(url); if(!res.ok) throw new Error(res.status);
+    const j = await res.json();
+    const rainIn = (j.daily.precipitation_sum||[]).reduce((a,b)=>a+(b||0),0);
+    const evapIn = (j.daily.et0_fao_evapotranspiration||[]).reduce((a,b)=>a+(b||0),0)/25.4; /* mm→in */
+    const data = {rainIn, evapIn, days};
+    weatherCache = {key, data};
+    return data;
+  }catch(e){ console.warn("weather", e); return null; }
+}
+function driftRates(){
+  /* average per-day changes between consecutive logged tests (pre-dose readings) */
+  const L = S.log; if(L.length<2) return null;
+  let phSum=0, saltSum=0, n=0;
+  for(let i=1;i<L.length;i++){
+    const d = daysBetween(L[i-1].ts, L[i].ts); if(d<0.5) continue;
+    phSum += ((L[i].readings.ph||0)-(L[i-1].readings.ph||0))/d;
+    saltSum += ((L[i].readings.salt||0)-(L[i-1].readings.salt||0))/d;
+    n++;
+  }
+  return n? {phPerDay:phSum/n, saltPerDay:saltSum/n} : null;
+}
+async function renderProjection(){
+  const el = $("dash-projection"), last = lastEntry();
+  if(!last){ el.innerHTML = '<div class="eyebrow">Projection</div><h2>Between tests</h2><div class="emptymsg">Run your first test session and projections will appear here — rain, evaporation, and expected doses at your twice-a-week cadence.</div>'; return; }
+  const days = daysBetween(last.ts, Date.now());
+  const g = totalGallons(), area = areaSqFt();
+  el.innerHTML = '<div class="eyebrow">Projection</div><h2>Since last test — '+fmt1(days)+' days</h2><div class="muted small">Fetching weather…</div>';
+  const w = await fetchWeather(last.ts);
+  const r = last.readings, t = targets();
+  let html = '<div class="eyebrow">Projection</div><h2>Since last test — '+fmt1(days)+' days</h2>';
+  let dil = 0, rainIn = null, evapIn = null;
+  if(w && area>0 && g>0){
+    rainIn = w.rainIn; evapIn = w.evapIn;
+    const rainGal = rainIn*area*0.623;
+    dil = Math.min(0.35, rainGal/g);
+    html += '<div class="rgrid">'+
+      '<div class="rcell"><div class="lab">Rain</div><div class="val">'+fmt1(rainIn)+' in</div></div>'+
+      '<div class="rcell"><div class="lab">Evap est.</div><div class="val">'+fmt1(evapIn)+' in</div></div>'+
+      '<div class="rcell"><div class="lab">Dilution</div><div class="val">'+fmt1(dil*100)+'%</div></div></div>';
+  } else {
+    html += '<div class="muted small">No weather data — set your location in Settings, or projections run on drift history alone.</div>';
+  }
+  const dr = driftRates();
+  const projected = {
+    ph: Math.min(8.4,(r.ph||7.5) + (dr? dr.phPerDay*days : (S.profile.sanitizer==="salt"?0.02*days:0.005*days))),
+    ta: (r.ta||0),
+    ch: (r.ch||0)*(1-dil) + ((Number(S.profile.fillCH)>0 && evapIn) ? (evapIn*area*0.623/g)*Number(S.profile.fillCH) : 0),
+    cya: (r.cya||0)*(1-dil),
+    salt: ((r.salt||0) + (dr? dr.saltPerDay*days*0.3 : 0))*(1-dil),
+    temp: r.temp||84
+  };
+  html += '<h3>Expected right now</h3><div class="rgrid">'+
+    '<div class="rcell"><div class="lab">pH</div><div class="val">'+fmt1(projected.ph)+'</div></div>'+
+    '<div class="rcell"><div class="lab">CH</div><div class="val">'+Math.round(projected.ch)+'</div></div>'+
+    '<div class="rcell"><div class="lab">CYA</div><div class="val">'+Math.round(projected.cya)+'</div></div>'+
+    (S.profile.sanitizer==="salt"?'<div class="rcell"><div class="lab">Salt</div><div class="val">'+Math.round(projected.salt)+'</div></div>':'')+
+    '</div>';
+  const plan = buildPlan(projected);
+  const needs = plan.filter(d=>d.chem!=="note");
+  html += '<h3>Likely at your next test</h3>';
+  html += needs.length
+    ? needs.map(d=>'<div class="small" style="margin-top:4px">• <b>'+esc(d.product)+'</b> — ~'+esc(d.amount)+' <span class="muted">('+esc(d.why)+')</span></div>').join("")
+    : '<div class="small chip ok">Nothing expected — water should still be in range</div>';
+  html += '<div class="muted small" style="margin-top:10px">Estimates assume evaporation is topped off with fill water and rain dilutes proportionally. Testing twice a week keeps these tight.</div>';
+  el.innerHTML = html;
+}
+
+/* ============ FILTERS ============ */
+function humanDays(d){
+  if(d===0) return "today";
+  if(d===1) return "tomorrow";
+  if(d<0){ const n=-d; return n===1?"1 day ago":(n<14?n+" days ago":(n<60?Math.round(n/7)+" weeks ago":Math.round(n/30.44)+" months ago")); }
+  if(d<14) return "in "+d+" days";
+  if(d<60) return "in "+Math.round(d/7)+" weeks";
+  return "in "+Math.round(d/30.44)+" months";
+}
+function filterStatus(f){
+  const now = Date.now(), out = [];
+  if(f.lastClean){
+    const due = new Date(f.lastClean).getTime() + f.cleanDays*86400000;
+    const d = Math.round((due-now)/86400000);
+    out.push(d<0 ? {cls:"bad", txt:"Clean overdue ("+humanDays(d)+")"} : d<=5 ? {cls:"warn", txt:"Clean "+humanDays(d)} : {cls:"ok", txt:"Clean "+humanDays(d)});
+  } else out.push({cls:"warn", txt:"No cleaning logged"});
+  if(f.lastReplace){
+    const due = new Date(f.lastReplace).getTime() + f.replaceMonths*30.44*86400000;
+    const d = Math.round((due-now)/86400000);
+    out.push(d<0 ? {cls:"bad", txt:"Replace overdue"} : d<=30 ? {cls:"warn", txt:"Replace "+humanDays(d)} : {cls:"ok", txt:"Replace "+humanDays(d)});
+  }
+  return out;
+}
+function toggleAddFilter(show){
+  $("add-filter-form").style.display = show ? "block" : "none";
+  $("add-filter-btnrow").style.display = show ? "none" : "flex";
+  if(show){ const el=$("nf-name"); if(el) setTimeout(()=>el.focus(),60); }
+}
+function addFilter(){
+  const name = $("nf-name").value.trim() || "Filter";
+  S.filters.push({id:Date.now(), name, type:$("nf-type").value,
+    cleanDays:Number($("nf-clean").value)||30, replaceMonths:Number($("nf-replace").value)||18,
+    lastClean:$("nf-lastclean").value||null, lastReplace:$("nf-lastreplace").value||null});
+  $("nf-name").value=""; $("nf-lastclean").value=""; $("nf-lastreplace").value="";
+  $("nf-clean").value="30"; $("nf-replace").value="18"; $("nf-type").value="cartridge";
+  save(); toggleAddFilter(false); renderFilters(); renderDash(); toast("Filter added.");
+}
+function markFilter(id, kind){
+  const f = S.filters.find(x=>x.id===id); if(!f) return;
+  const today = new Date().toISOString().slice(0,10);
+  if(kind==="clean") f.lastClean = today; else { f.lastReplace = today; f.lastClean = today; }
+  save(); renderFilters(); renderDash();
+}
+function removeFilter(id){
+  appConfirm("Remove this filter?", ()=>{
+    S.filters = S.filters.filter(x=>x.id!==id); save(); renderFilters(); renderDash();
+  }, "Remove");
+}
+function editFilter(id){
+  const f = S.filters.find(x=>x.id===id); if(!f) return;
+  appForm("Edit filter", [
+    {key:"name", label:"Name", value:f.name},
+    {key:"type", label:"Type", type:"select", value:f.type, options:[
+      {v:"cartridge",l:"Cartridge"},{v:"sand",l:"Sand"},{v:"de",l:"DE"}]},
+    {key:"cleanDays", label:"Clean every (days)", type:"number", value:f.cleanDays},
+    {key:"replaceMonths", label:"Replace every (months)", type:"number", value:f.replaceMonths},
+    {key:"lastClean", label:"Last cleaned", type:"date", value:f.lastClean||""},
+    {key:"lastReplace", label:"Last replaced", type:"date", value:f.lastReplace||""}
+  ], v=>{
+    f.name = (v.name||"").trim()||f.name;
+    f.type = v.type; f.cleanDays = Number(v.cleanDays)||f.cleanDays;
+    f.replaceMonths = Number(v.replaceMonths)||f.replaceMonths;
+    f.lastClean = v.lastClean||null; f.lastReplace = v.lastReplace||null;
+    save(); renderFilters(); renderDash(); toast("Filter updated.");
+  });
+}
+function renderFilters(){
+  const el = $("filter-list");
+  if(!S.filters.length){ el.innerHTML = '<div class="emptymsg">No filters yet. Add your cartridge, sand, or DE filter below and the app will nag you at the right time.</div>'; return; }
+  el.innerHTML = S.filters.map(f=>{
+    const st = filterStatus(f).map(s=>'<span class="chip '+s.cls+'">'+s.txt+'</span>').join(" ");
+    const typeName = {cartridge:"Cartridge", sand:"Sand", de:"DE"}[f.type]||f.type;
+    return '<div class="fitem"><div onclick="editFilter('+f.id+')" style="cursor:pointer;flex:1"><div class="nm">'+esc(f.name)+' <span class="muted small">· '+typeName+' · tap to edit</span></div>'+
+      '<div class="meta">clean every '+f.cleanDays+' day'+(f.cleanDays==1?'':'s')+' · replace every '+f.replaceMonths+' month'+(f.replaceMonths==1?'':'s')+'</div>'+
+      '<div style="margin-top:5px">'+st+'</div></div>'+
+      '<div style="display:flex;flex-direction:column;gap:6px">'+
+      '<button class="btn sm quiet" onclick="markFilter('+f.id+',\'clean\')">Cleaned</button>'+
+      '<button class="btn sm ghost" onclick="markFilter('+f.id+',\'replace\')">Replaced</button>'+
+      '<button class="btn sm danger" onclick="removeFilter('+f.id+')">Remove</button></div></div>';
+  }).join("");
+}
+
+/* ============ LOG + CHARTS ============ */
+function renderLog(){
+  const el = $("log-list");
+  if(!S.log.length){ el.innerHTML = '<div class="emptymsg">No sessions logged yet.</div>'; }
+  else {
+    el.innerHTML = [...S.log].reverse().map(e=>{
+      const st = lsiStatus(e.lsi);
+      const doses = (e.doses||[]).filter(d=>d.added);
+      const eq = e.pump ? ' · pump '+e.pump.hours+'h/'+e.pump.output+'%' : '';
+      const fc = e.readings.fc!=null ? ' · FC '+e.readings.fc : '';
+      const phTxt = e.readings.phOffScale ? '≥8.0 (off scale' + (e.readings.resultPh!=null? ', titrated to '+fmt1(e.readings.resultPh):'') + ')' : e.readings.ph;
+      const lsiTxt = (e.readings.phOffScale?'≥':'')+(e.lsi>0?"+":"")+fmt2(e.lsi);
+      // Why each product was recommended (added or not) — reasoning transparency
+      const added = (e.doses||[]).filter(d=>d.added);
+      const whyAdded = added.length
+        ? '<div class="small" style="margin-top:8px"><b>Why added:</b></div>'+added.map(d=>'<div class="small" style="margin-top:3px">• '+esc(d.product)+(d.why?' — '+esc(d.why):'')+'</div>').join("")
+        : "";
+      const holds = e.holds || holdReasons(e.readings); // recompute for pre-1.8 entries
+      const whyNot = holds && holds.length
+        ? '<div class="small" style="margin-top:8px"><b>Why nothing else:</b></div>'+holds.map(h=>'<div class="small" style="margin-top:3px">• <b>'+esc(h.p)+':</b> '+esc(h.txt)+'</div>').join("")
+        : "";
+      const cr = e.carried||{};
+      const mk = k => cr[k]? '<span class="muted" title="last recorded, not tested this session">*</span>' : '';
+      const carriedNote = Object.keys(cr).length
+        ? '<div class="muted small" style="margin-top:4px">* carried from a previous test, not measured this session</div>' : '';
+      return '<details class="lentry"><summary><span class="d">'+fmtDate(e.ts)+'</span>'+
+        '<span class="lsi chip '+st.cls+'">LSI '+lsiTxt+'</span></summary>'+
+        '<div class="body">pH '+phTxt+' · TA '+e.readings.ta+mk("ta")+' · CH '+e.readings.ch+mk("ch")+' · CYA '+(e.readings.cya??"—")+mk("cya")+
+        (e.readings.salt?' · Salt '+e.readings.salt:'')+fc+' · '+e.readings.temp+'°F'+eq+carriedNote+'<br>'+
+        (doses.length? "Added: "+doses.map(d=>esc(d.product)+" — "+esc(d.amount)).join("; ") : "No products added")+
+        (e.notes? '<br>Notes: '+esc(e.notes):'')+
+        whyAdded + whyNot +
+        '<div class="btnrow" style="margin-top:10px"><button class="btn sm quiet" onclick="editLogEntry('+e.ts+')">Edit readings</button>'+
+        '<button class="btn sm danger" onclick="deleteLogEntry('+e.ts+')">Delete</button></div></div></details>';
+    }).join("");
+  }
+  const salt = S.profile.sanitizer==="salt";
+  $("spark-third-title").textContent = salt ? "Salt (ppm)" : "Calcium (ppm)";
+  drawSpark("spark-lsi", S.log.map(e=>e.lsi), {lo:0, hi:0.3, fixed:[-1,1]});
+  drawSpark("spark-ph", S.log.map(e=>Number(e.readings.ph)), {lo:7.4, hi:7.6});
+  drawSpark("spark-third", S.log.map(e=> salt? Number(e.readings.salt||0) : Number(e.readings.ch||0)),
+    salt? {lo:targets().salt.lo, hi:targets().salt.hi} : {lo:targets().ch.lo, hi:targets().ch.hi});
+}
+function editLogEntry(ts){
+  const e = S.log.find(x=>x.ts===ts); if(!e) return;
+  const r = e.readings, salt = S.profile.sanitizer==="salt";
+  const fields = [
+    {key:"temp", label:"Temp (°F)", type:"number", step:"1", value:r.temp}
+  ];
+  if(salt) fields.push({key:"salt", label:"Salt (ppm)", type:"number", step:"10", value:r.salt});
+  fields.push(
+    {key:"ph", label:"pH", type:"number", step:"0.1", value:r.ph},
+    {key:"ta", label:"TA (ppm)", type:"number", step:"10", value:r.ta},
+    {key:"ch", label:"CH (ppm)", type:"number", step:"10", value:r.ch},
+    {key:"cya", label:"CYA (ppm)", type:"number", step:"5", value:r.cya}
+  );
+  if(salt) fields.push({key:"fc", label:"FC (ppm)", type:"number", step:"0.2", value:r.fc});
+  fields.push({key:"notes", label:"Notes", type:"textarea", value:e.notes||""});
+  appForm("Edit "+fmtDate(ts)+" (date locked)", fields, v=>{
+    ["temp","salt","ph","ta","ch","cya","fc"].forEach(k=>{ if(v[k]!=null && v[k]!=="") r[k]=Number(v[k]); });
+    e.notes = v.notes||"";
+    e.lsi = computeLSI(r);
+    e.holds = holdReasons(r);
+    save(); renderLog(); renderDash(); toast("Entry updated — LSI recomputed.");
+  });
+}
+function deleteLogEntry(ts){
+  appConfirm("Delete this log entry? This can't be undone.", ()=>{
+    S.log = S.log.filter(x=>x.ts!==ts); save(); renderLog(); renderDash(); toast("Entry deleted.");
+  }, "Delete");
+}
+function drawSpark(id, vals, band){
+  const c = $(id); if(!c) return;
+  const dpr = window.devicePixelRatio||1, W = c.clientWidth||300, H = 110;
+  c.width = W*dpr; c.height = H*dpr;
+  const x = c.getContext("2d"); x.scale(dpr,dpr); x.clearRect(0,0,W,H);
+  if(vals.length<1){ x.fillStyle="#5D7377"; x.font="12px Instrument Sans"; x.fillText("Log sessions to see the trend", 10, 58); return; }
+  let lo = Math.min(...vals, band.lo), hi = Math.max(...vals, band.hi);
+  if(band.fixed){ lo=Math.min(lo,band.fixed[0]); hi=Math.max(hi,band.fixed[1]); }
+  const pad=(hi-lo)*0.15||1; lo-=pad; hi+=pad;
+  const px = i => vals.length===1 ? W/2 : 8 + i*(W-16)/(vals.length-1);
+  const py = v => H-14 - (v-lo)/(hi-lo)*(H-28);
+  /* target band */
+  x.fillStyle = "rgba(23,126,150,.12)";
+  x.fillRect(0, py(band.hi), W, py(band.lo)-py(band.hi));
+  /* line */
+  x.strokeStyle = "#0C4A50"; x.lineWidth = 2; x.beginPath();
+  vals.forEach((v,i)=>{ i? x.lineTo(px(i),py(v)) : x.moveTo(px(i),py(v)); }); x.stroke();
+  x.fillStyle = "#177E96";
+  vals.forEach((v,i)=>{ x.beginPath(); x.arc(px(i),py(v),3,0,7); x.fill(); });
+  x.fillStyle="#5D7377"; x.font="10px IBM Plex Mono";
+  x.fillText(fmt1(hi-pad), 4, 10); x.fillText(fmt1(lo+pad), 4, H-3);
+}
+function exportCSV(){
+  const rows = [["date","temp_f","salt_ppm","ph","ta_ppm","ch_ppm","cya_ppm","lsi","products_added","notes"]];
+  S.log.forEach(e=>rows.push([new Date(e.ts).toISOString(), e.readings.temp||"", e.readings.salt||"", e.readings.ph||"",
+    e.readings.ta||"", e.readings.ch||"", e.readings.cya||"", e.lsi,
+    (e.doses||[]).filter(d=>d.added).map(d=>d.product+" "+d.amount).join(" | "), (e.notes||"").replace(/[\n,]/g," ")]));
+  downloadFile("deepend-log-"+stamp()+".csv", rows.map(r=>r.join(",")).join("\n"), "text/csv");
+}
+function stamp(){ return new Date().toISOString().slice(0,10); }
+function exportJSON(){
+  const payload = {app:"deepend", version:APP_VERSION, exportedAt:new Date().toISOString(), data:S};
+  downloadFile("deepend-backup-v"+APP_VERSION+"-"+stamp()+".json", JSON.stringify(payload,null,2), "application/json");
+}
+function importJSON(ev){
+  const f = ev.target.files[0]; if(!f) return;
+  const rd = new FileReader();
+  rd.onload = () => { try{
+      const parsed = JSON.parse(rd.result);
+      const data = (parsed && parsed.app==="deepend" && parsed.data) ? parsed.data : parsed; /* v1.1 wrapped or v1.0 raw */
+      S = Object.assign(JSON.parse(JSON.stringify(BLANK)), data);
+      S.shelf = Object.assign(JSON.parse(JSON.stringify(DEFAULT_SHELF)), S.shelf||{});
+      S.enh = Object.assign({on:false, notes:[]}, S.enh||{});
+      S.profile = Object.assign(JSON.parse(JSON.stringify(BLANK.profile)), S.profile||{});
+      save(); bindSettings(); renderAll();
+      toast("Restored"+(parsed.version? " (backup from v"+parsed.version+")":"")+".");
+    }catch(e){ toast("That file didn't parse as a Deep End backup."); } };
+  rd.readAsText(f);
+}
+/* ============ ENHANCEMENTS ============ */
+let enhSelMode = false;
+function renderEnh(){
+  $("enh-body").style.display = S.enh.on ? "block" : "none";
+  if(!S.enh.on){ enhSelMode = false; return; }
+  const list = $("enh-list");
+  if(!S.enh.notes.length){ list.innerHTML = '<div class="emptymsg">No notes yet. Jot the first idea above.</div>'; }
+  else list.innerHTML = [...S.enh.notes].reverse().map(n=>
+    '<div class="fitem"><div style="display:flex;gap:10px;align-items:flex-start;min-width:0">'+
+    (enhSelMode? '<input type="checkbox" class="enh-ck" data-id="'+n.id+'" style="width:20px;height:20px;accent-color:var(--water);margin-top:2px;flex:none">' : '')+
+    '<div style="min-width:0"'+(enhSelMode?'':' onclick="editEnh('+n.id+')" title="Tap to edit"')+'><div class="small" style="word-break:break-word">'+esc(n.text)+'</div><div class="meta">'+fmtDate(n.ts)+(enhSelMode?'':' · tap to edit')+'</div></div></div>'+
+    (enhSelMode? '' : '<button class="btn sm danger" onclick="removeEnh('+n.id+')">Remove</button>')+
+    '</div>').join("");
+  $("enh-selactions").style.display = enhSelMode? "flex" : "none";
+  $("enh-selbtn").textContent = enhSelMode? "Done" : "Select";
+  const copyall = $("enh-copyall"); if(copyall) copyall.style.display = (enhSelMode||!S.enh.notes.length)? "none":"inline-block";
+}
+function addEnh(){
+  const t = $("enh-input").value.trim(); if(!t){ toast("Type a note first."); return; }
+  S.enh.notes.push({id:Date.now(), ts:Date.now(), text:t});
+  $("enh-input").value = ""; save(); renderEnh();
+}
+function removeEnh(id){
+  appConfirm("Remove this note permanently?", ()=>{
+    S.enh.notes = S.enh.notes.filter(n=>n.id!==id); save(); renderEnh();
+  }, "Remove");
+}
+function editEnh(id){
+  const n = S.enh.notes.find(x=>x.id===id); if(!n) return;
+  appForm("Edit note", [{key:"text", label:"Note", type:"textarea", value:n.text}], v=>{
+    const t=(v.text||"").trim(); if(!t){ toast("Note can't be empty."); return; }
+    n.text = t; save(); renderEnh(); toast("Note updated.");
+  });
+}
+function toggleEnhSel(){ enhSelMode = !enhSelMode; renderEnh(); }
+function toggleEnhSelectAll(){
+  const boxes = [...document.querySelectorAll(".enh-ck")];
+  const allOn = boxes.length && boxes.every(b=>b.checked);
+  boxes.forEach(b=>{ b.checked = !allOn; });
+  const btn = $("enh-selall"); if(btn) btn.textContent = allOn? "Select all" : "Select none";
+}
+function copyAllEnh(){
+  if(!S.enh.notes.length){ toast("No notes to copy."); return; }
+  const txt = S.enh.notes.map(n=>"- "+n.text).join("\n");
+  const done = ()=> toast("Copied all "+S.enh.notes.length+" notes.");
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done, ()=>fallbackCopy(txt, done));
+  } else fallbackCopy(txt, done);
+}
+function copySelectedEnh(){
+  const ids = [...document.querySelectorAll(".enh-ck:checked")].map(c=>Number(c.dataset.id));
+  if(!ids.length){ toast("Check at least one note first."); return; }
+  const txt = S.enh.notes.filter(n=>ids.includes(n.id)).map(n=>"- "+n.text).join("\n");
+  const done = ()=>{ toast("Copied "+ids.length+" note"+(ids.length>1?"s":"")+"."); enhSelMode = false; renderEnh(); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done, ()=>fallbackCopy(txt, done));
+  } else fallbackCopy(txt, done);
+}
+function fallbackCopy(txt, done){
+  const ta = document.createElement("textarea"); ta.value = txt;
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand("copy"); }catch(e){}
+  ta.remove(); done();
+}
+function applyFontSize(){
+  const fs = (S.profile && S.profile.fontSize) || "medium";
+  document.documentElement.setAttribute("data-fs", fs);
+}
+function renderAbout(){
+  $("about-version").textContent = "Deep End v"+APP_VERSION;
+  $("about-notes").innerHTML = RELEASE_NOTES.map((rel,idx)=>
+    '<details class="lentry" '+(idx===0?"open":"")+'><summary><span class="d">v'+rel.v+
+    ' <span class="muted small">· '+rel.d+'</span></span><span class="muted small">'+(idx===0?"":"tap")+'</span></summary>'+
+    '<div class="body">'+rel.items.map(i=>'<div class="small" style="margin-top:3px">• '+esc(i)+'</div>').join("")+'</div></details>'
+  ).join("");
+}
+function downloadFile(name, content, type){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([content],{type})); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function resetAll(){
+  appConfirm("Erase every setting, filter, and log entry on this device?", ()=>{
+    S = JSON.parse(JSON.stringify(BLANK)); save(); bindSettings(); renderAll(); toast("All data erased.");
+  }, "Erase");
+}
+
+/* ============ DASHBOARD ============ */
+function renderDash(){
+  const last = lastEntry();
+  const warn = $("dash-warnings"); let wh = "";
+  S.filters.forEach(f=>filterStatus(f).forEach(s=>{
+    if(s.cls==="bad") wh += '<div class="warnbar bad">⚠ '+esc(f.name)+': '+s.txt+'</div>';
+    else if(s.cls==="warn" && /in \d+d/.test(s.txt)) wh += '<div class="warnbar warn">'+esc(f.name)+': '+s.txt+'</div>';
+  }));
+  if(last && daysBetween(last.ts, Date.now())>4.5) wh += '<div class="warnbar warn">It\'s been '+Math.round(daysBetween(last.ts,Date.now()))+' days since your last test — twice a week keeps the LSI honest.</div>';
+  // Staleness nudge for slow-but-drifting params (CH, CYA) — based on last FRESH measurement
+  [["cya","CYA",45],["ch","Calcium",60]].forEach(([key,label,limitDays])=>{
+    const freshTs = lastFreshMeasure(key);
+    if(freshTs!=null){
+      const d = Math.round(daysBetween(freshTs, Date.now()));
+      if(d>limitDays) wh += '<div class="warnbar warn">'+label+' hasn\'t been tested in '+d+' days — it drifts over time, so a fresh reading keeps your LSI accurate.</div>';
+    }
+  });
+  warn.innerHTML = wh;
+  if(last){
+    const st = lsiStatus(last.lsi);
+    $("dash-lsi").textContent = (last.lsi>0?"+":"")+fmt2(last.lsi);
+    $("dash-lsi-chip").innerHTML = '<span class="chip '+st.cls+'">'+st.txt+'</span>';
+    $("dash-lsi-when").textContent = "Tested "+fmtDate(last.ts);
+    const pos = Math.max(0, Math.min(100, (last.lsi+1)/2*100));
+    $("gauge-needle").style.left = pos+"%";
+    const r = last.readings;
+    $("dash-readings").innerHTML =
+      '<div class="rcell"><div class="lab">pH</div><div class="val">'+r.ph+'</div></div>'+
+      '<div class="rcell"><div class="lab">TA</div><div class="val">'+r.ta+'</div></div>'+
+      '<div class="rcell"><div class="lab">CH</div><div class="val">'+r.ch+'</div></div>'+
+      '<div class="rcell"><div class="lab">CYA</div><div class="val">'+(r.cya??"—")+'</div></div>'+
+      (r.salt?'<div class="rcell"><div class="lab">Salt</div><div class="val">'+r.salt+'</div></div>':'')+
+      '<div class="rcell"><div class="lab">Temp</div><div class="val">'+r.temp+'°F</div></div>';
+  } else {
+    $("dash-lsi").textContent="—"; $("dash-lsi-chip").innerHTML=""; $("gauge-needle").style.left="50%";
+    $("dash-lsi-when").textContent="No tests logged yet — run your first session.";
+    $("dash-readings").innerHTML="";
+  }
+  // Season-end preset nudge (once per season/year)
+  maybeSeasonNudge();
+  const df = $("dash-filters");
+  df.innerHTML = '<div class="eyebrow">Equipment</div><h2>Filters</h2>'+
+    (S.filters.length ? S.filters.map(f=>{
+      const st = filterStatus(f).map(s=>'<span class="chip '+s.cls+'">'+s.txt+'</span>').join(" ");
+      return '<div class="fitem"><div class="nm">'+esc(f.name)+'</div><div>'+st+'</div></div>'; }).join("")
+    : '<div class="muted small">Add your filters in the Filters tab to get cleaning and replacement warnings here.</div>');
+  renderProjection();
+}
+
+/* Offer to update a season's preset once, at season end, if data showed a persistent lean. */
+function maybeSeasonNudge(){
+  if(S.profile.sanitizer!=="salt") return;
+  const now = new Date(), curSeason = activeSeason();
+  // Determine the season that just ended = the one whose start is closest behind curSeason's start, i.e. previous season.
+  const order = ["spring","summer","fall","winter"];
+  // find previous season by start-month ordering
+  const sorted = order.map(s=>[s,S.profile.seasonStarts[s]]).sort((a,b)=>a[1]-b[1]).map(x=>x[0]);
+  const idx = sorted.indexOf(curSeason);
+  const prevSeason = sorted[(idx-1+sorted.length)%sorted.length];
+  const yr = now.getFullYear();
+  const promptedKey = prevSeason+"-"+yr;
+  if((S.profile.seasonPromptedYear||{})[promptedKey]) return;
+  // need enough logged data within prevSeason to judge
+  const seasonLogs = S.log.filter(e=>e.pump && e.readings && e.readings.fc!=null && seasonForDate(new Date(e.ts))===prevSeason);
+  if(seasonLogs.length < 4) return;
+  const tgt = fcTarget();
+  const avgFC = seasonLogs.reduce((a,e)=>a+Number(e.readings.fc),0)/seasonLogs.length;
+  const gap = tgt - avgFC; // +ve => ran low all season
+  if(Math.abs(gap) < 0.6) { markSeasonPrompted(promptedKey); return; }
+  const preset = S.profile.seasons[prevSeason];
+  const suggestOutput = Math.max(10, Math.min(100, preset.output + Math.round(gap*12)));
+  appConfirm(SEASON_NAMES[prevSeason]+" ran "+(gap>0?"low":"high")+" on FC (avg "+fmt1(avgFC)+" vs target "+fmt1(tgt)+"). Update next year's "+SEASON_NAMES[prevSeason]+" output to "+suggestOutput+"%?",
+    ()=>{ S.profile.seasons[prevSeason].output = suggestOutput; markSeasonPrompted(promptedKey); save(); toast(SEASON_NAMES[prevSeason]+" preset updated to "+suggestOutput+"%."); },
+    "Update");
+  // if they cancel, still mark so it doesn't nag repeatedly
+  const noBtn = $("app-modal-no");
+  const prevNo = noBtn.onclick;
+  noBtn.onclick = ()=>{ markSeasonPrompted(promptedKey); save(); if(prevNo) prevNo(); };
+}
+function markSeasonPrompted(key){
+  if(!S.profile.seasonPromptedYear) S.profile.seasonPromptedYear = {};
+  S.profile.seasonPromptedYear[key] = true;
+}
+
+/* ============ SETTINGS ============ */
+function segBind(id, key, onchange){
+  const seg = $(id);
+  seg.querySelectorAll("button").forEach(b=>{
+    b.classList.toggle("on", S.profile[key]===b.dataset.v);
+    b.onclick = ()=>{ S.profile[key]=b.dataset.v; save();
+      seg.querySelectorAll("button").forEach(x=>x.classList.toggle("on", x===b));
+      if(onchange) onchange(); };
+  });
+}
+function numBind(id, key){
+  const el = $(id); el.value = S.profile[key] ?? "";
+  el.onchange = ()=>{ S.profile[key] = el.value===""? null : Number(el.value); save(); };
+}
+function bindSettings(){
+  segBind("seg-sanitizer","sanitizer", ()=>{ toggleSaltUI(); renderAll(); });
+  segBind("seg-combined","combined", ()=>{ $("spa-gal-wrap").style.display = S.profile.combined==="yes"?"block":"none"; });
+  segBind("seg-surface","surface"); segBind("seg-ground","ground");
+  $("spa-gal-wrap").style.display = S.profile.combined==="yes"?"block":"none";
+  numBind("set-gallons","gallons"); numBind("set-spagallons","spaGallons");
+  numBind("set-depth","avgDepth"); numBind("set-area","areaSqFt");
+  numBind("set-celltarget","cellTarget"); numBind("set-fillch","fillCH");
+  numBind("set-cyatarget","cyaTarget"); numBind("set-fcmin","fcMin"); numBind("set-fcmax","fcMax");
+  numBind("set-ozperdrop","ozPerDrop");
+  numBind("set-lat","lat"); numBind("set-lon","lon");
+  const kit = $("set-kit"); kit.value = S.profile.kit;
+  kit.onchange = ()=>{ S.profile.kit = kit.value; save(); };
+  const cell = $("set-cell"); cell.value = S.profile.cell||"t15";
+  cell.onchange = ()=>{ S.profile.cell = cell.value; save(); };
+  renderSeasonEditor();
+  const segE = $("seg-enh");
+  segE.querySelectorAll("button").forEach(b=>{
+    b.classList.toggle("on", (S.enh.on?"on":"off")===b.dataset.v);
+    b.onclick = ()=>{ S.enh.on = b.dataset.v==="on"; save();
+      segE.querySelectorAll("button").forEach(x=>x.classList.toggle("on", x===b));
+      renderEnh(); };
+  });
+  const segF = $("seg-fontsize");
+  if(segF){
+    segF.querySelectorAll("button").forEach(b=>{
+      b.classList.toggle("on", (S.profile.fontSize||"medium")===b.dataset.v);
+      b.onclick = ()=>{ S.profile.fontSize = b.dataset.v; save();
+        segF.querySelectorAll("button").forEach(x=>x.classList.toggle("on", x===b));
+        applyFontSize(); };
+    });
+  }
+  toggleSaltUI(); renderShelf(); renderEnh();
+}
+function toggleSaltUI(){
+  const salt = S.profile.sanitizer==="salt";
+  $("salt-target-wrap").style.display = salt?"grid":"none";
+  const cc = $("cell-card"); if(cc) cc.style.display = salt?"block":"none";
+}
+const MONTHS = ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function renderSeasonEditor(){
+  const el = $("season-editor"); if(!el) return;
+  const p = S.profile, active = activeSeason();
+  el.innerHTML = ["spring","summer","fall","winter"].map(sn=>{
+    const s = p.seasons[sn], start = p.seasonStarts[sn];
+    const isActive = sn===active;
+    return '<div style="border:1px solid var(--line);border-radius:11px;padding:10px;margin-top:8px'+(isActive?';border-color:var(--water)':'')+'">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center"><b>'+SEASON_NAMES[sn]+'</b>'+
+      (isActive?'<span class="chip info">active now</span>':'')+'</div>'+
+      '<div class="row2" style="margin-top:6px">'+
+        '<div><label class="f" style="margin-top:4px">Pump hrs/day</label><input type="number" step="0.5" data-season="'+sn+'" data-fld="hours" value="'+s.hours+'"></div>'+
+        '<div><label class="f" style="margin-top:4px">Output %</label><input type="number" step="5" data-season="'+sn+'" data-fld="output" value="'+s.output+'"></div>'+
+      '</div>'+
+      '<label class="f" style="margin-top:4px">Season starts</label>'+
+      '<select data-season="'+sn+'" data-fld="start">'+
+        [1,2,3,4,5,6,7,8,9,10,11,12].map(m=>'<option value="'+m+'"'+(m===start?' selected':'')+'>'+MONTHS[m]+'</option>').join("")+
+      '</select></div>';
+  }).join("");
+  el.querySelectorAll("input,select").forEach(inp=>{
+    inp.onchange = ()=>{
+      const sn = inp.dataset.season, fld = inp.dataset.fld;
+      if(fld==="start"){ S.profile.seasonStarts[sn] = Number(inp.value); }
+      else { S.profile.seasons[sn][fld] = Number(inp.value)||0; }
+      save(); renderSeasonEditor();
+    };
+  });
+}
+function renderShelf(){
+  const cats = {acid:"pH / TA down", phup:"pH up", bicarb:"Alkalinity up", calcium:"Calcium up", cya:"Stabilizer", salt:"Salt", chlorine:"Chlorine"};
+  $("shelf-editor").innerHTML = Object.keys(cats).map(k=>{
+    const it = S.shelf[k];
+    return '<div class="shelfitem"><div class="cat">'+cats[k]+'</div>'+
+      '<input type="text" data-shelf="'+k+'" data-fld="label" value="'+esc(it.label)+'">'+
+      '<input type="number" data-shelf="'+k+'" data-fld="strength" value="'+it.strength+'" step="0.05" inputmode="decimal" title="strength %">'+
+      '</div>';
+  }).join("");
+  $("shelf-editor").querySelectorAll("input").forEach(inp=>{
+    inp.onchange = ()=>{ const it = S.shelf[inp.dataset.shelf];
+      it[inp.dataset.fld] = inp.dataset.fld==="strength"? Number(inp.value): inp.value; save(); };
+  });
+}
+function useMyLocation(){
+  if(!navigator.geolocation){ $("loc-status").textContent = "Geolocation isn't available in this browser."; return; }
+  $("loc-status").textContent = "Locating…";
+  navigator.geolocation.getCurrentPosition(pos=>{
+    S.profile.lat = Math.round(pos.coords.latitude*10000)/10000;
+    S.profile.lon = Math.round(pos.coords.longitude*10000)/10000;
+    $("set-lat").value = S.profile.lat; $("set-lon").value = S.profile.lon;
+    save(); $("loc-status").textContent = "Location set."; renderProjection();
+  }, err=>{ $("loc-status").textContent = "Couldn't get location — enter lat/lon manually."; });
+}
+
+/* ============ NAV + INIT ============ */
+function showView(v){
+  document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));
+  $("view-"+v).classList.add("active");
+  document.querySelectorAll("nav.tabs button").forEach(b=>b.classList.toggle("on", b.dataset.view===v));
+  if(v==="dash") renderDash();
+  if(v==="filters") renderFilters();
+  if(v==="log") renderLog();
+  window.scrollTo(0,0);
+}
+document.querySelectorAll("nav.tabs button").forEach(b=> b.onclick = ()=>{
+  if(b.dataset.view==="test"){ startWizard(); return; }
+  showView(b.dataset.view);
+});
+function renderAll(){ renderDash(); renderFilters(); renderLog(); }
+applyFontSize(); bindSettings(); renderAbout();
+document.querySelector("header.app .sub").textContent = "Pool & LSI · v"+APP_VERSION;
+const firstRun = !S.profile.gallons;
+showView(firstRun ? "settings" : "dash");
+</script>
+</body>
+</html>
