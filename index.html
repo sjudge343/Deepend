@@ -384,8 +384,11 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.31.0";
+const APP_VERSION = "1.32.0";
 const RELEASE_NOTES = [
+  {v:"1.32.0", d:"Aug 3, 2026", items:[
+    "You can now reorder products on the shelf. Each card in Settings \u2192 product shelf has up/down arrows in the top-right corner \u2014 tap to move a product. The order you set is reflected on the Upkeep inventory list too."
+  ]},
   {v:"1.31.0", d:"Aug 3, 2026", items:[
     "The low-stock alert is now set in the package unit you buy in \u2014 pounds for dry products, gallons for liquids \u2014 instead of the internal dosing unit. So you\u2019d set soda ash to alert at, say, 1 lb rather than 16 oz. Your existing alert values were converted automatically."
   ]},
@@ -613,7 +616,7 @@ const BLANK = {
   profile:{sanitizer:"salt", combined:"no", gallons:null, spaGallons:null, surface:"plaster",
     ground:"inground", kit:"k2006", avgDepth:5, areaSqFt:null, cellTarget:3200, fillCH:null,
     lat:null, lon:null, cyaTarget:50, fcMin:2, fcMax:5, fontSize:"medium", ozPerDrop:10,
-    cell:"t15", cellEffFactor:null, lowAtPkgMigrated:false,
+    cell:"t15", cellEffFactor:null, lowAtPkgMigrated:false, shelfOrder:null,
     seasonStarts:{spring:3, summer:6, fall:9, winter:12},
     seasons:{
       spring:{hours:8, output:50}, summer:{hours:10, output:60},
@@ -2569,6 +2572,23 @@ function renderSeasonEditor(){
 /* ============ INVENTORY ============ */
 /* Which shelf products to show in the on-hand tracker, in display order. */
 const INV_ORDER = ["acid","chlorine","shock","cya","calcium","bicarb","phup","salt"];
+/* User-controlled product order (v1.32): both the shelf editor and the Upkeep inventory read this.
+   Stored in S.profile.shelfOrder; falls back to INV_ORDER, and any product missing from a saved
+   order is appended so nothing disappears. */
+function shelfOrder(){
+  const all = INV_ORDER.slice();
+  const saved = Array.isArray(S.profile.shelfOrder) ? S.profile.shelfOrder.filter(k=>S.shelf[k]) : [];
+  const merged = saved.slice();
+  all.forEach(k=>{ if(!merged.includes(k)) merged.push(k); });   // append any new/missing products
+  return merged;
+}
+function moveShelf(k, dir){
+  const order = shelfOrder(); const i = order.indexOf(k); if(i<0) return;
+  const j = i + dir; if(j<0 || j>=order.length) return;
+  order.splice(i,1); order.splice(j,0,k);
+  S.profile.shelfOrder = order; save();
+  renderShelf(); renderInventory();
+}
 /* Single source of truth: is this product outside the automated treatment plan?
    Salt cell makes chlorine (so liquid chlorine is backup-only on salt pools); shock is always as-needed;
    salt only matters on a salt pool. Keep in sync with the ROLE map in renderShelf. */
@@ -2653,7 +2673,7 @@ function fmtStock(it, k){
 }
 function renderInventory(){
   const el = $("dash-inventory"); if(!el) return;
-  const items = INV_ORDER.filter(k=>S.shelf[k] && !S.shelf[k].hidden).map(k=>({k, it:S.shelf[k]}));
+  const items = shelfOrder().filter(k=>S.shelf[k] && !S.shelf[k].hidden).map(k=>({k, it:S.shelf[k]}));
   el.innerHTML =
     '<div class="eyebrow">Supplies</div><h2>Inventory</h2>'+
     '<div class="muted small">On-hand amounts. <b>−/+ are corrections</b> (fixing a wrong count) — they don\'t log usage. Use <b>Restock</b> when you buy more, and <b>Log a product</b> when you apply some.</div>'+
@@ -2742,7 +2762,7 @@ function decrementInventory(chem, amountStr){
 }
 /* ---- Quick add: log a product APPLIED outside a test (e.g. shock). Logs + decrements + feeds usage. ---- */
 function openQuickAdd(){
-  const opts = INV_ORDER.filter(k=>S.shelf[k] && !S.shelf[k].hidden).map(k=>({v:k, l:S.shelf[k].label+" ("+unitOf(S.shelf[k],k)+")"}));
+  const opts = shelfOrder().filter(k=>S.shelf[k] && !S.shelf[k].hidden).map(k=>({v:k, l:S.shelf[k].label+" ("+unitOf(S.shelf[k],k)+")"}));
   appForm("Log a product added", [
     {key:"prod", label:"Product", type:"select", options:opts, value:opts[0].v},
     {key:"amt", label:"Amount added", type:"number", step:"0.5", value:""},
@@ -2780,7 +2800,8 @@ function renderShelf(){
     shock:"added as needed (super-chlorination), not driven by a test",
     salt:"only relevant on a salt pool"
   };
-  $("shelf-editor").innerHTML = Object.keys(cats).map(k=>{
+  const order = shelfOrder();
+  $("shelf-editor").innerHTML = order.map((k, idx)=>{
     const it = S.shelf[k]; const u = unitOf(it,k);
     const trackOnly = isTrackingOnly(k);
     const treatsLine = !trackOnly
@@ -2788,8 +2809,17 @@ function renderShelf(){
       : '<div style="margin-top:4px"><span class="chip" style="font-size:11px;background:var(--line)">Tracking only</span>'+
         (trackingNote[k]?' <span class="muted small">'+esc(trackingNote[k])+'</span>':'')+'</div>';
     const hasBulk = it.buyUnit && it.buyQty>0;
+    const upDis = idx===0 ? ' disabled style="opacity:.3"' : '';
+    const dnDis = idx===order.length-1 ? ' disabled style="opacity:.3"' : '';
+    const reorder = '<div style="display:flex;gap:6px;flex:0 0 auto;margin-left:10px">'+
+      '<button class="btn sm quiet" onclick="moveShelf(\''+k+'\',-1)" title="Move up"'+upDis+' style="padding:4px 9px;line-height:1">▲</button>'+
+      '<button class="btn sm quiet" onclick="moveShelf(\''+k+'\',1)" title="Move down"'+dnDis+' style="padding:4px 9px;line-height:1">▼</button>'+
+    '</div>';
     return '<div class="shelfitem" style="display:block;padding:14px;margin-top:14px;border:1px solid var(--line);border-radius:14px;background:var(--card)">'+
-      '<div class="cat" style="font-weight:700;margin-top:0;color:var(--deepend)">'+cats[k]+'</div>'+
+      '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">'+
+        '<div class="cat" style="font-weight:700;margin-top:0;color:var(--deepend)">'+cats[k]+'</div>'+
+        reorder+
+      '</div>'+
       treatsLine +
       '<input type="text" data-shelf="'+k+'" data-fld="label" value="'+esc(it.label)+'" placeholder="Product name" style="margin-top:6px">'+
       '<div class="row2" style="margin-top:6px">'+
