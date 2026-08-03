@@ -381,8 +381,12 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.22.0";
+const APP_VERSION = "1.23.0";
 const RELEASE_NOTES = [
+  {v:"1.23.0", d:"Aug 3, 2026", items:[
+    "The treatment plan now checks your inventory. If it recommends a product you don\u2019t have enough of, it tells you right there that you\u2019ll need to buy it \u2014 and instead of \u201cI added this,\u201d it sets up a reminder (defaulting to tomorrow) to apply it once it arrives.",
+    "That reminder lands on your Today screen. Tap it to record the application \u2014 which logs it, updates inventory, and clears the task. If your count was just stale, you can still record it anytime from \u201cEdit doses\u201d on the logged test."
+  ]},
   {v:"1.22.0", d:"Aug 3, 2026", items:[
     "Skip a recommended product (waiting on stock, no time)? When you leave \u201cI added this\u201d unchecked, you can now tap \u201cRemind me to apply this\u201d and pick a date (defaults to tomorrow).",
     "The reminder lands in Today on that date: \u201cApply [product] — [amount].\u201d Tap it to record what you actually added — it logs, updates inventory, and clears the task. Everything you do stays recorded."
@@ -1246,25 +1250,49 @@ function toggleDoseReminderDate(i){
 function renderReview(){
   const r = wiz.r, lsi = computeLSI(r), st = lsiStatus(lsi), plan = buildPlan(r);
   wiz.plan = plan; wiz.lsi = lsi;
-  const doses = plan.length ? plan.map((d,i)=>
-    '<div class="dose">'+
+  const doses = plan.length ? plan.map((d,i)=>{
+    let ck = "";
+    if(d.chem!=="note"){
+      const it = S.shelf[d.chem];
+      const need = doseQty(d.amount);
+      const onHand = Number(it&&it.qty||0);
+      // Out of stock = a real dosing product the app recommends but you can't cover from inventory.
+      // (Tracking-only items like chlorine/shock on a salt pool are excluded — they're not app-dosed.)
+      const outOfStock = !isTrackingOnly(d.chem) && need>0 && onHand < need;
+      if(outOfStock){
+        const u = unitOf(it, d.chem);
+        ck =
+          '<div class="warnline">You don\'t have enough '+esc(it?it.label:d.product)+' on hand ('+ (Math.round(onHand*10)/10) +' '+esc(u)+' of '+ (Math.round(need*10)/10) +' '+esc(u)+' needed). You\'ll need to purchase it — set a reminder to apply it once it arrives.</div>'+
+          '<div id="dose-remind-'+i+'" style="margin-top:6px;padding:8px 10px;background:var(--waterlite);border-radius:10px">'+
+            '<label class="ck" style="margin-top:0"><input type="checkbox" id="dose-rem-ck-'+i+'" checked onchange="toggleDoseReminderDate('+i+')"> Remind me to apply this</label>'+
+            '<div id="dose-rem-date-'+i+'" style="margin-top:6px">'+
+              '<label class="f">Remind me on</label>'+
+              '<input type="date" id="dose-rem-when-'+i+'" value="'+tomorrowISO()+'">'+
+            '</div>'+
+          '</div>'+
+          '<input type="checkbox" id="dose-ck-'+i+'" style="display:none">';  // hidden, stays unchecked → logs as not added
+      } else {
+        ck =
+          '<label class="ck"><input type="checkbox" id="dose-ck-'+i+'" checked onchange="toggleDoseReminder('+i+')"> I added this</label>'+
+          '<div id="dose-remind-'+i+'" style="display:none;margin-top:6px;padding:8px 10px;background:var(--waterlite);border-radius:10px">'+
+            '<label class="ck" style="margin-top:0"><input type="checkbox" id="dose-rem-ck-'+i+'" onchange="toggleDoseReminderDate('+i+')"> Remind me to apply this</label>'+
+            '<div id="dose-rem-date-'+i+'" style="display:none;margin-top:6px">'+
+              '<label class="f">Remind me on</label>'+
+              '<input type="date" id="dose-rem-when-'+i+'" value="'+tomorrowISO()+'">'+
+            '</div>'+
+          '</div>';
+      }
+    }
+    return '<div class="dose">'+
       (d.seq?('<span class="seqn">Step '+d.seq+'</span>'):"")+'<b>'+esc(d.product)+'</b>'+
       '<div class="amt">'+esc(d.amount)+'</div>'+
       '<div class="why">'+esc(d.why)+'</div>'+
       '<div class="small" style="margin-top:6px">'+esc(d.how)+'</div>'+
       (d.warn?('<div class="warnline">'+esc(d.warn)+'</div>'):"")+
       (d.wait?('<div class="wait">⏱ '+esc(d.wait)+'</div>'):"")+
-      (d.chem!=="note"?(
-        '<label class="ck"><input type="checkbox" id="dose-ck-'+i+'" checked onchange="toggleDoseReminder('+i+')"> I added this</label>'+
-        '<div id="dose-remind-'+i+'" style="display:none;margin-top:6px;padding:8px 10px;background:var(--waterlite);border-radius:10px">'+
-          '<label class="ck" style="margin-top:0"><input type="checkbox" id="dose-rem-ck-'+i+'" onchange="toggleDoseReminderDate('+i+')"> Remind me to apply this</label>'+
-          '<div id="dose-rem-date-'+i+'" style="display:none;margin-top:6px">'+
-            '<label class="f">Remind me on</label>'+
-            '<input type="date" id="dose-rem-when-'+i+'" value="'+tomorrowISO()+'">'+
-          '</div>'+
-        '</div>'
-      ):"")+
-    '</div>').join("")
+      ck+
+    '</div>';
+  }).join("")
     : '<div class="hint"><b>Nothing to add.</b> Water is in range — log the test and enjoy the pool.</div>';
   const ca = carbAlk(r.ta, r.cya);
   const offScale = !!r.phOffScale;
