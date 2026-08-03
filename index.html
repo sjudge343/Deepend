@@ -205,6 +205,7 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
     </div>
   </div>
   <div class="card" id="dash-inventory"></div>
+  <div class="card" id="dash-spending"></div>
 </section>
 
 <!-- LOG -->
@@ -318,7 +319,9 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
   <div class="card">
     <h2>Product shelf</h2>
     <div class="muted small">The dosing engine only speaks in these products. Edit names and strengths to match what you actually buy.</div>
-    <div id="shelf-editor"></div>
+    <label class="ck" style="margin-top:12px"><input type="checkbox" id="set-costtracking"> Track purchase costs</label>
+    <div class="muted small" style="margin-top:2px">When on, Restock asks for the price and the Upkeep tab shows spending by product. Turn off to hide both; your history is kept.</div>
+    <div id="shelf-editor" style="margin-top:8px"></div>
   </div>
 
   <div class="card">
@@ -381,8 +384,18 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.26.0";
+const APP_VERSION = "1.28.0";
 const RELEASE_NOTES = [
+  {v:"1.28.0", d:"Aug 3, 2026", items:[
+    "Stale-data protection. If you go to apply a reminder whose test is more than a day old, the app now recommends a quick retest first \u2014 just the readings that affect that product. It recomputes the dose from your fresh numbers so you add the right amount, not one based on chemistry that may have drifted.",
+    "The retest is recorded as a logged test, and the freshly-computed dose is applied and logged \u2014 all in one step. If the retest comes back in range, it tells you the product is no longer needed and adds nothing."
+  ]},
+  {v:"1.27.0", d:"Aug 3, 2026", items:[
+    "Cost tracking. When you Restock a product, enter the price per purchase unit (per gallon, per bag, etc.) \u2014 the app multiplies price \u00d7 quantity for the total. The price defaults to what you last paid (or 0 to start). No tax.",
+    "New Spending card on the Upkeep tab: cost by product, year-to-date and prior calendar year, with a grand total.",
+    "Turn cost tracking on or off in Settings \u2192 Product shelf. When off, the price prompt and the spending card disappear; your history is kept and picks up wherever you resume.",
+    "Clearer product shelf: each product is now its own card, so it\u2019s obvious where one ends and the next begins."
+  ]},
   {v:"1.26.0", d:"Aug 3, 2026", items:[
     "You can now show or hide any product on the Upkeep tab. In Settings \u2192 product shelf, each product has a \u201cShow on Upkeep tab\u201d switch. Handy for hiding a product your pool type doesn\u2019t use \u2014 like liquid chlorine on a salt pool (the cell makes it), or salt on a chlorine pool. Hiding only affects the Upkeep list; nothing is deleted and dosing is unaffected."
   ]},
@@ -1557,7 +1570,7 @@ function editFilter(id){
 }
 function renderFilters(){
   const el = $("filter-list");
-  if(!S.filters.length){ el.innerHTML = '<div class="emptymsg">No filters yet. Add your cartridge, sand, or DE filter below and the app will nag you at the right time.</div>'; renderInventory(); return; }
+  if(!S.filters.length){ el.innerHTML = '<div class="emptymsg">No filters yet. Add your cartridge, sand, or DE filter below and the app will nag you at the right time.</div>'; renderInventory(); renderSpending(); return; }
   el.innerHTML = S.filters.map(f=>{
     const st = filterStatus(f).map(s=>'<span class="chip '+s.cls+'">'+s.txt+'</span>').join(" ");
     const typeName = {cartridge:"Cartridge", sand:"Sand", de:"DE"}[f.type]||f.type;
@@ -1569,7 +1582,7 @@ function renderFilters(){
       '<button class="btn sm ghost" onclick="markFilter('+f.id+',\'replace\')">Replaced</button>'+
       '<button class="btn sm danger" onclick="removeFilter('+f.id+')">Remove</button></div></div>';
   }).join("");
-  renderInventory();
+  renderInventory(); renderSpending();
 }
 
 /* ============ LOG + CHARTS ============ */
@@ -2229,6 +2242,56 @@ function openApplyProduct(taskId){
     save(); renderAll(); if($("view-today").classList.contains("active")) renderToday();
   });
 }
+/* Focused retest (v1.28): when applying off a >24h-old reminder, retest just the readings that
+   drive this product's dose, recompute from fresh numbers, RECORD the retest as a logged test,
+   then apply the recomputed amount. Prevents chasing the water with stale data. */
+function startFocusedRetest(t){
+  const drivers = DOSE_DRIVERS[t.chem] || ["ph","ta","ch","cya","temp"];
+  const it = S.shelf[t.chem];
+  const last = lastEntry();
+  const prev = last ? last.readings : {};
+  // Build a field per driving reading, pre-filled with the last known value as a starting point.
+  const fields = [{key:"retestnote", type:"note",
+    label:"Retest the readings that affect "+(it?it.label:t.product)+", then I'll recompute the dose from these fresh numbers and record them."}];
+  drivers.forEach(k=>{
+    const meta = STEP_META[k];
+    fields.push({key:k, label:(meta?meta.name:k)+(meta&&meta.unit?" ("+meta.unit+")":""),
+      type:"number", step:(k==="ph"?"0.1":"1"), value: prev[k]!=null ? String(prev[k]) : ""});
+  });
+  appForm("Retest for "+(it?it.label:t.product), fields, (v)=>{
+    // Assemble fresh readings: retested drivers override, everything else carries forward from last test.
+    const r = Object.assign({}, prev);
+    let missing = false;
+    drivers.forEach(k=>{ if(v[k]==null || v[k]==="" || isNaN(Number(v[k]))) missing = true; else r[k] = Number(v[k]); });
+    if(missing){ toast("Enter all the readings so the dose is accurate."); return; }
+    // Recompute the plan from fresh readings and find THIS product's dose.
+    const plan = buildPlan(r);
+    const dose = plan.find(d=>d.chem===t.chem);
+    const lsi = computeLSI(r);
+    const now = Date.now();
+    // Record the retest as a proper logged test (fresh readings + LSI). Mark which params were retested.
+    const entry = {ts:now, readings:r, lsi, doses:[], notes:"Focused retest before applying "+(it?it.label:t.product)+"."};
+    if(dose){
+      const u = unitOf(it, t.chem);
+      const freshQty = doseQty(dose.amount);
+      entry.doses = [{chem:t.chem, product:(it?it.label:t.product), amount:dose.amount, added:true, appliedQty:freshQty}];
+      S.log.push(entry);
+      const short = decrementInventory(t.chem, dose.amount);
+      t.done = true;
+      S.log.sort((a,b)=>a.ts-b.ts);
+      save(); renderAll(); if($("view-today")&&$("view-today").classList.contains("active")) renderToday();
+      toast("Retested and applied the updated dose: "+dose.amount+(short>0?" (on-hand short — check the count)":"")+".");
+    } else {
+      // Fresh readings show this product is no longer needed — record the retest, clear the reminder, add nothing.
+      entry.notes = (it?it.label:t.product)+" no longer needed after retest — readings are in range now.";
+      S.log.push(entry);
+      t.done = true;
+      S.log.sort((a,b)=>a.ts-b.ts);
+      save(); renderAll(); if($("view-today")&&$("view-today").classList.contains("active")) renderToday();
+      toast((it?it.label:t.product)+" isn't needed anymore — your retest came back in range. Nothing added.");
+    }
+  });
+}
 function renderDash(){
   const last = lastEntry();
   if(last){
@@ -2338,6 +2401,12 @@ function bindSettings(){
         applyFontSize(); };
     });
   }
+  const costCk = $("set-costtracking");
+  if(costCk){
+    costCk.checked = S.profile.costTracking !== false;  // default ON
+    costCk.onchange = ()=>{ S.profile.costTracking = costCk.checked; save();
+      renderShelf(); renderInventory(); renderSpending(); };
+  }
   toggleSaltUI(); renderShelf(); renderEnh();
 }
 function toggleSaltUI(){
@@ -2386,6 +2455,50 @@ function isTrackingOnly(k){
   if(k==="salt") return !salt;         // chlorine pool → salt is irrelevant
   return false;
 }
+/* Spending sheet (v1.27): per-product cost totals for this calendar year (YTD) and prior year,
+   plus a grand total. Sums S.purchases[].total. Hidden when cost tracking is off. */
+function renderSpending(){
+  const el = $("dash-spending"); if(!el) return;
+  if(S.profile.costTracking === false){ el.style.display="none"; el.innerHTML=""; return; }
+  el.style.display="";
+  const now = new Date(), thisYear = now.getFullYear(), lastYear = thisYear-1;
+  const purchases = Array.isArray(S.purchases)? S.purchases : [];
+  // bucket by product → {ytd, prior}
+  const byProd = {};
+  let totYtd=0, totPrior=0;
+  purchases.forEach(p=>{
+    const y = new Date(p.ts).getFullYear();
+    if(y!==thisYear && y!==lastYear) return;
+    if(!byProd[p.chem]) byProd[p.chem] = {product:p.product||(S.shelf[p.chem]&&S.shelf[p.chem].label)||p.chem, ytd:0, prior:0};
+    if(y===thisYear){ byProd[p.chem].ytd += p.total; totYtd += p.total; }
+    else { byProd[p.chem].prior += p.total; totPrior += p.total; }
+  });
+  const rows = Object.keys(byProd).map(k=>byProd[k]).sort((a,b)=>b.ytd-a.ytd);
+  const money = n => "$"+(Math.round(n*100)/100).toFixed(2);
+  let html = '<div class="eyebrow">Spending</div><h2>Cost by product</h2>'+
+    '<div class="muted small">Purchases you\'ve logged at restock, no tax. YTD = '+thisYear+' so far; Prior = '+lastYear+'.</div>';
+  if(!rows.length){
+    html += '<div class="hint" style="margin-top:10px">No purchases logged yet this year or last. Enter a cost when you Restock a product and it\'ll show up here.</div>';
+    el.innerHTML = html; return;
+  }
+  html += '<div style="margin-top:12px">'+
+    '<div style="display:flex;font-weight:700;font-size:0.8rem;color:var(--deepend);padding-bottom:6px;border-bottom:2px solid var(--line)">'+
+      '<div style="flex:1">Product</div><div style="width:84px;text-align:right">YTD '+thisYear+'</div><div style="width:84px;text-align:right">'+lastYear+'</div>'+
+    '</div>'+
+    rows.map(r=>
+      '<div style="display:flex;padding:8px 0;border-bottom:1px solid var(--line);font-size:0.9rem">'+
+        '<div style="flex:1">'+esc(r.product)+'</div>'+
+        '<div style="width:84px;text-align:right;font-family:\'IBM Plex Mono\',monospace">'+money(r.ytd)+'</div>'+
+        '<div style="width:84px;text-align:right;font-family:\'IBM Plex Mono\',monospace;color:var(--mist)">'+money(r.prior)+'</div>'+
+      '</div>').join("")+
+    '<div style="display:flex;padding:10px 0 0;font-weight:700;font-size:0.95rem">'+
+      '<div style="flex:1">Total</div>'+
+      '<div style="width:84px;text-align:right;font-family:\'IBM Plex Mono\',monospace">'+money(totYtd)+'</div>'+
+      '<div style="width:84px;text-align:right;font-family:\'IBM Plex Mono\',monospace;color:var(--mist)">'+money(totPrior)+'</div>'+
+    '</div>'+
+  '</div>';
+  el.innerHTML = html;
+}
 function renderInventory(){
   const el = $("dash-inventory"); if(!el) return;
   const items = INV_ORDER.filter(k=>S.shelf[k] && !S.shelf[k].hidden).map(k=>({k, it:S.shelf[k]}));
@@ -2433,17 +2546,33 @@ function openRestock(k){
   const opts = [];
   if(it.buyUnit && it.buyQty>0) opts.push({v:"buy", l:it.buyUnit+" ("+it.buyQty+" "+cu+" each)"});
   opts.push({v:"cons", l:cu+" (single units)"});
-  appForm("Restock "+it.label, [
-    {key:"unit", label:"Add in", type:"select", options:opts, value:opts[0].v},
+  const defBuyUnit = opts[0].v;
+  const costOn = S.profile.costTracking !== false;  // default ON
+  const lastCost = it.lastCost!=null ? it.lastCost : 0;
+  const costLabel = "Cost per "+(defBuyUnit==="buy" ? (it.buyUnit||"unit") : cu)+" (no tax)";
+  const fields = [
+    {key:"unit", label:"Add in", type:"select", options:opts, value:defBuyUnit},
     {key:"qty", label:"How many", type:"number", step:"0.5", value:""}
-  ], (v)=>{
+  ];
+  if(costOn) fields.push({key:"cost", label:costLabel, type:"number", step:"0.01", value:String(lastCost)});
+  appForm("Restock "+it.label, fields, (v)=>{
     const q = Number(v.qty);
     if(!q||q<=0){ toast("Enter a quantity."); return; }
     const add = v.unit==="buy" ? q*it.buyQty : q;
     it.qty = Math.round((Number(it.qty||0) + add)*10)/10;
     if(it.qty > 0) it.shortfall = false;  // restocked — clear the "count was off" flag
+    let total = 0;
+    if(costOn){
+      // Cost is PER PURCHASE UNIT (per container if buying in bulk, else per consumption unit).
+      const unitCost = Math.max(0, Number(v.cost)||0);
+      it.lastCost = unitCost;                         // default for next restock
+      total = Math.round(unitCost * q * 100)/100;     // price × quantity purchased (in the chosen unit)
+      if(!Array.isArray(S.purchases)) S.purchases = [];
+      S.purchases.push({ts:Date.now(), chem:k, product:it.label,
+        buyUnit: v.unit==="buy" ? (it.buyUnit||"container") : cu, qty:q, unitCost, total});
+    }
     save(); renderInventory(); renderDash();
-    toast("Added "+Math.round(add*10)/10+" "+cu+" to "+it.label+".");
+    toast("Added "+Math.round(add*10)/10+" "+cu+" to "+it.label+(costOn&&total>0?" — $"+total.toFixed(2):"")+".");
   });
 }
 /* Subtract a USED amount from on-hand when a dose is logged (test or quick-add). This IS consumption. */
@@ -2507,8 +2636,8 @@ function renderShelf(){
       : '<div style="margin-top:4px"><span class="chip" style="font-size:11px;background:var(--line)">Tracking only</span>'+
         (trackingNote[k]?' <span class="muted small">'+esc(trackingNote[k])+'</span>':'')+'</div>';
     const hasBulk = it.buyUnit && it.buyQty>0;
-    return '<div class="shelfitem" style="display:block;padding:12px 0;border-bottom:1px solid var(--line)">'+
-      '<div class="cat" style="font-weight:600">'+cats[k]+'</div>'+
+    return '<div class="shelfitem" style="display:block;padding:14px;margin-top:14px;border:1px solid var(--line);border-radius:14px;background:var(--card)">'+
+      '<div class="cat" style="font-weight:700;margin-top:0;color:var(--deepend)">'+cats[k]+'</div>'+
       treatsLine +
       '<input type="text" data-shelf="'+k+'" data-fld="label" value="'+esc(it.label)+'" placeholder="Product name" style="margin-top:6px">'+
       '<div class="row2" style="margin-top:6px">'+
