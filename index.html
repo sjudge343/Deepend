@@ -140,8 +140,15 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <main>
 
 <!-- DASHBOARD -->
+<section class="view" id="view-today">
+  <div class="card">
+    <div class="eyebrow">Today</div>
+    <h2 id="today-greeting">What to do</h2>
+    <div id="today-list"></div>
+  </div>
+</section>
+
 <section class="view" id="view-dash">
-  <div id="dash-warnings"></div>
   <div class="card">
     <div class="eyebrow">Water Balance</div>
     <h2 id="dash-lsi-title">Saturation Index</h2>
@@ -359,7 +366,8 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 </main>
 
 <nav class="tabs">
-  <button data-view="dash" class="on"><svg viewBox="0 0 24 24"><path d="M3 12c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 17c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 7c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/></svg>Pool</button>
+  <button data-view="today" class="on"><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Today</button>
+  <button data-view="dash"><svg viewBox="0 0 24 24"><path d="M3 12c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 17c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 7c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/></svg>Pool</button>
   <button data-view="test"><svg viewBox="0 0 24 24"><path d="M9 3h6M10 3v5l-4.5 8.5A3 3 0 0 0 8.2 21h7.6a3 3 0 0 0 2.7-4.5L14 8V3"/><path d="M7.5 15h9"/></svg>Test</button>
   <button data-view="filters"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16M6 6.5c3 2 9 2 12 0M6 17.5c3-2 9-2 12 0"/></svg>Filters</button>
   <button data-view="log"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg>Log</button>
@@ -374,8 +382,16 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.19.0";
+const APP_VERSION = "1.21.0";
 const RELEASE_NOTES = [
+  {v:"1.21.0", d:"Aug 3, 2026", items:[
+    "Simplified: everything that\u2019s due now lives in one place \u2014 the Today tab. Removed the duplicate reminder bar from the Pool tab, so Pool is a clean status view (your current balance and inventory) and Today is the single list of what to do and when."
+  ]},
+  {v:"1.20.0", d:"Aug 3, 2026", items:[
+    "New Today tab \u2014 now the home screen. One prioritized list of everything due right now: tests, the acid follow-up after a stabilizer dose, filter cleaning, backups, and stale-reading checks, most urgent first. Each item has a button that takes you straight into the action.",
+    "The app now closes the loop on deferred acid: a few days after a large stabilizer dose, Today prompts you to re-test pH and add acid. You record the pH you measured and the amount you added (or note none was needed) \u2014 it logs, updates inventory, and clears the task.",
+    "Everything you do stays recorded, and the app tracks when things are due so you don\u2019t have to."
+  ]},
   {v:"1.19.0", d:"Aug 3, 2026", items:[
     "Smarter sequencing to protect plaster and keep water clear. When a large stabilizer (CYA) dose is due, the app now holds the pH acid — since stabilizer is mildly acidic and lowers pH on its own over 2\u20133 days — and tells you to re-test pH in a few days before adding acid, so you don\u2019t overshoot low.",
     "Inline interaction warnings on the treatment steps: calcium and acid (permanent-cloudiness risk), calcium and soda ash, and calcium and shock must be added several hours apart. Wait times lengthen automatically in warm water (>85\u00b0F). Pool shock carries a handling-safety note.",
@@ -510,7 +526,7 @@ const BLANK = {
     },
     seasonPromptedYear:{}},
   shelf: JSON.parse(JSON.stringify(DEFAULT_SHELF)),
-  filters:[], log:[], enh:{on:false, notes:[]}
+  filters:[], log:[], tasks:[], enh:{on:false, notes:[]}
 };
 const CELLS = {
   t15:{label:"Hayward TurboCell T-CELL-15 (40k gal)", lbday:1.45},
@@ -532,6 +548,7 @@ function load(){
     if(raw){ const s = JSON.parse(raw);
       s.shelf = mergeShelf(s.shelf);
       s.enh = Object.assign({on:false, notes:[]}, s.enh||{});
+      if(!Array.isArray(s.tasks)) s.tasks = [];
       s.profile = Object.assign(JSON.parse(JSON.stringify(BLANK.profile)), s.profile||{});
       return Object.assign(JSON.parse(JSON.stringify(BLANK)), s); } }
   catch(e){ console.warn("load failed", e); }
@@ -1284,7 +1301,7 @@ function renderReview(){
 }
 function cancelWizard(){
   appConfirm("Discard this test session without saving? Your readings won't be logged.", ()=>{
-    wiz = null; showView("dash"); toast("Session discarded.");
+    wiz = null; showView("today"); toast("Session discarded.");
   }, "Discard");
 }
 function logTreatment(){
@@ -1305,7 +1322,14 @@ function logTreatment(){
   S.log.push(entry);
   // auto-decrement inventory for everything actually added
   doses.forEach(d=>{ if(d.added) decrementInventory(d.chem, d.amount); });
-  save(); wiz=null; showView("dash");
+  // If this plan DEFERRED the acid for a big CYA dose, schedule a follow-up to re-test pH + add acid.
+  const deferred = (wiz.plan||[]).some(x=>x.product==="Hold the acid for now");
+  const addedCya = doses.some(d=>d.chem==="cya" && d.added);
+  if(deferred && addedCya){
+    S.tasks.push({ id:"acid-"+entry.ts, type:"acidFollowup", createdTs:entry.ts,
+      dueTs: entry.ts + 3*86400000, done:false, ph:entry.readings.ph });
+  }
+  save(); wiz=null; showView("today");
 }
 
 /* ============ WEATHER + PROJECTIONS ============ */
@@ -1879,28 +1903,133 @@ function resetAll(){
 }
 
 /* ============ DASHBOARD ============ */
-function renderDash(){
-  const last = lastEntry();
-  const warn = $("dash-warnings"); let wh = "";
-  S.filters.forEach(f=>filterStatus(f).forEach(s=>{
-    if(s.cls==="bad") wh += '<div class="warnbar bad">⚠ '+esc(f.name)+': '+s.txt+'</div>';
-    else if(s.cls==="warn" && /in \d+d/.test(s.txt)) wh += '<div class="warnbar warn">'+esc(f.name)+': '+s.txt+'</div>';
-  }));
-  if(last && daysBetween(last.ts, Date.now())>4.5) wh += '<div class="warnbar warn">It\'s been '+Math.round(daysBetween(last.ts,Date.now()))+' days since your last test — twice a week keeps the LSI honest.</div>';
-  // Backup nudge — data lives only on this phone
-  if(S.log.length){
-    if(!S.lastBackup) wh += '<div class="warnbar warn">You haven\'t backed up yet. Back up your data in Settings so you don\'t lose your history.</div>';
-    else if((Date.now()-S.lastBackup)/86400000 > 14) wh += '<div class="warnbar warn">Last backup was '+Math.round((Date.now()-S.lastBackup)/86400000)+' days ago — back up again in Settings.</div>';
+/* ============ TASK ENGINE (v1.20) ============ */
+/* Single source of truth for "what does the user need to do, and when."
+   Produces a sorted list of actionable tasks from app state. Both the Today tab and any
+   badges read from here. Priority: lower sorts first. dueTs drives overdue vs upcoming. */
+function computeTasks(){
+  const now = Date.now(), tasks = [], last = lastEntry();
+  const DAY = 86400000;
+  // 1. Deferred-acid follow-ups (from S.tasks persistent store) — highest priority when due
+  (S.tasks||[]).forEach(t=>{
+    if(t.type==="acidFollowup" && !t.done){
+      const overdue = now >= t.dueTs;
+      tasks.push({
+        id:t.id, prio: overdue?0:5, dueTs:t.dueTs,
+        cls: overdue?"bad":"warn",
+        title: overdue ? "Re-test pH and add acid (was due "+fmtDate(t.dueTs)+")"
+                       : "Re-test pH and add acid — due "+fmtDate(t.dueTs),
+        detail: "Stabilizer was added "+fmtDate(t.createdTs)+". It lowers pH as it dissolves — test pH now and add acid if still high.",
+        action:{kind:"acidFollowup", taskId:t.id}
+      });
+    }
+  });
+  // 2. Test due — twice a week cadence
+  if(last){
+    const days = daysBetween(last.ts, now);
+    if(days>4.5) tasks.push({ id:"test-due", prio: days>7?1:6, dueTs: last.ts+3.5*DAY, cls: days>7?"bad":"warn",
+      title:"Time to test the water", detail:"It's been "+Math.round(days)+" days since your last test — twice a week keeps the LSI honest.",
+      action:{kind:"startTest"} });
+  } else {
+    tasks.push({ id:"test-first", prio:2, dueTs:now, cls:"warn",
+      title:"Run your first test", detail:"Test your water to get your first balance reading and plan.",
+      action:{kind:"startTest"} });
   }
-  // Staleness nudge for slow-but-drifting params (CH, CYA) — based on last FRESH measurement
+  // 3. Stale slow-params (CH, CYA)
   [["cya","CYA",45],["ch","Calcium",60]].forEach(([key,label,limitDays])=>{
     const freshTs = lastFreshMeasure(key);
     if(freshTs!=null){
-      const d = Math.round(daysBetween(freshTs, Date.now()));
-      if(d>limitDays) wh += '<div class="warnbar warn">'+label+' hasn\'t been tested in '+d+' days — it drifts over time, so a fresh reading keeps your LSI accurate.</div>';
+      const d = Math.round(daysBetween(freshTs, now));
+      if(d>limitDays) tasks.push({ id:"stale-"+key, prio:8, dueTs: freshTs+limitDays*DAY, cls:"warn",
+        title: label+" is due for a fresh test", detail: label+" hasn't been tested in "+d+" days — it drifts over time, so a fresh reading keeps your LSI accurate.",
+        action:{kind:"startTest"} });
     }
   });
-  warn.innerHTML = wh;
+  // 4. Filter tasks (clean/replace due or overdue)
+  S.filters.forEach(f=>filterStatus(f).forEach(s=>{
+    if(s.cls==="bad") tasks.push({ id:"filter-"+f.id+"-"+s.txt.slice(0,6), prio:3, dueTs:now, cls:"bad",
+      title: f.name+": "+s.txt, detail:"", action:{kind:"goFilters"} });
+    else if(s.cls==="warn" && /in \d+d/.test(s.txt)) tasks.push({ id:"filter-"+f.id+"-soon", prio:9, dueTs:now, cls:"warn",
+      title: f.name+": "+s.txt, detail:"", action:{kind:"goFilters"} });
+  }));
+  // 5. Backup — data lives only on this phone
+  if(S.log.length){
+    if(!S.lastBackup) tasks.push({ id:"backup", prio:7, dueTs:now, cls:"warn",
+      title:"Back up your data", detail:"You haven't backed up yet — your data lives only on this phone. Back up in Settings.",
+      action:{kind:"goSettings"} });
+    else if((now-S.lastBackup)/DAY > 14) tasks.push({ id:"backup", prio:9, dueTs:S.lastBackup+14*DAY, cls:"warn",
+      title:"Back up your data", detail:"Last backup was "+Math.round((now-S.lastBackup)/DAY)+" days ago — back up again in Settings.",
+      action:{kind:"goSettings"} });
+  }
+  tasks.sort((a,b)=> a.prio-b.prio || a.dueTs-b.dueTs);
+  return tasks;
+}
+function runTaskAction(act){
+  if(act.kind==="startTest") startWizard();
+  else if(act.kind==="goFilters") showView("filters");
+  else if(act.kind==="goSettings") showView("settings");
+  else if(act.kind==="acidFollowup") openAcidFollowup(act.taskId);
+}
+let TODAY_ACTIONS = [];
+function taskCta(kind){
+  return kind==="startTest"?"Start test":kind==="acidFollowup"?"Re-test & log":kind==="goFilters"?"Go to filters":kind==="goSettings"?"Open settings":"Do it";
+}
+function renderToday(){
+  const el = $("today-list"); if(!el) return;
+  const tasks = computeTasks();
+  TODAY_ACTIONS = tasks.map(t=>t.action);
+  const hour = new Date().getHours();
+  const greet = hour<12?"Good morning":hour<18?"Good afternoon":"Good evening";
+  $("today-greeting").textContent = tasks.length ? greet+" — here's what to do" : greet;
+  if(!tasks.length){
+    const last = lastEntry();
+    el.innerHTML = '<div class="hint" style="margin-top:6px"><b>You\'re all caught up.</b> '+
+      (last? "Water was last tested "+fmtDate(last.ts)+". I\'ll let you know when something\'s due." : "Nothing due right now.")+'</div>';
+    return;
+  }
+  el.innerHTML = tasks.map((t,i)=>
+    '<div class="taskrow" style="border:1px solid var(--line);border-left:4px solid '+(t.cls==="bad"?"#b23":"var(--amber)")+';border-radius:12px;padding:12px;margin-top:10px">'+
+      '<div style="font-weight:600">'+esc(t.title)+'</div>'+
+      (t.detail?'<div class="muted small" style="margin-top:3px">'+esc(t.detail)+'</div>':'')+
+      '<div class="btnrow" style="margin-top:10px"><button class="btn sm primary" onclick="runTaskAction(TODAY_ACTIONS['+i+'])">'+taskCta(t.action.kind)+'</button></div>'+
+    '</div>'
+  ).join("");
+}
+/* Deferred-acid follow-up: re-test pH a few days after a big CYA dose, then add acid (or not).
+   Records what actually happened, decrements inventory, feeds usage, and clears the task. */
+function openAcidFollowup(taskId){
+  const t = (S.tasks||[]).find(x=>x.id===taskId); if(!t) return;
+  const acidU = unitOf(S.shelf.acid,"acid");
+  appForm("Re-test pH & add acid", [
+    {key:"ph", label:"pH you measured now", type:"number", step:"0.1", value:""},
+    {key:"added", label:"Did you add acid?", type:"select",
+      options:[{v:"yes",l:"Yes — I added acid"},{v:"no",l:"No — pH was fine, none needed"}], value:"yes"},
+    {key:"amt", label:"Amount of acid added ("+acidU+")", type:"number", step:"0.5", value:""}
+  ], (v)=>{
+    const ph = Number(v.ph);
+    if(!ph || ph<6 || ph>9){ toast("Enter the pH you measured (6–9)."); return; }
+    const now = Date.now();
+    if(v.added==="yes"){
+      const amt = Number(v.amt);
+      if(!amt || amt<=0){ toast("Enter the amount of acid you added."); return; }
+      const amountStr = amt+" "+acidU;
+      S.log.push({ts:now, standalone:true, readings:{ph}, doses:[{chem:"acid", product:S.shelf.acid.label, amount:amountStr, added:true, appliedQty:amt}],
+        notes:"Acid follow-up after stabilizer dose. pH measured "+ph+"."});
+      const short = decrementInventory("acid", amountStr);
+      if(short>0) toast("Logged. Acid on-hand was short — correct the count on the dashboard.");
+      else toast("Logged your acid addition. Nice — that closes the loop.");
+    } else {
+      S.log.push({ts:now, standalone:true, readings:{ph}, doses:[],
+        notes:"Acid follow-up after stabilizer dose — pH measured "+ph+", already in range, no acid needed."});
+      toast("Logged — pH settled on its own, no acid needed.");
+    }
+    t.done = true;
+    S.log.sort((a,b)=>a.ts-b.ts);
+    save(); renderAll(); if($("view-today").classList.contains("active")) renderToday();
+  });
+}
+function renderDash(){
+  const last = lastEntry();
   if(last){
     const st = lsiStatus(last.lsi);
     $("dash-lsi").textContent = (last.lsi>0?"+":"")+fmt2(last.lsi);
@@ -2232,6 +2361,7 @@ function showView(v){
   document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));
   $("view-"+v).classList.add("active");
   document.querySelectorAll("nav.tabs button").forEach(b=>b.classList.toggle("on", b.dataset.view===v));
+  if(v==="today") renderToday();
   if(v==="dash") renderDash();
   if(v==="filters") renderFilters();
   if(v==="log") renderLog();
@@ -2241,11 +2371,11 @@ document.querySelectorAll("nav.tabs button").forEach(b=> b.onclick = ()=>{
   if(b.dataset.view==="test"){ startWizard(); return; }
   showView(b.dataset.view);
 });
-function renderAll(){ renderDash(); renderFilters(); renderLog(); }
+function renderAll(){ if($("view-today")) renderToday(); renderDash(); renderFilters(); renderLog(); }
 applyFontSize(); bindSettings(); renderAbout();
 document.querySelector("header.app .sub").textContent = "Pool & LSI · v"+APP_VERSION;
 const firstRun = !S.profile.gallons;
-showView(firstRun ? "settings" : "dash");
+showView(firstRun ? "settings" : "today");
 </script>
 </body>
 </html>
