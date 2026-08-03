@@ -373,8 +373,12 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.14.0";
+const APP_VERSION = "1.15.0";
 const RELEASE_NOTES = [
+  {v:"1.15.0", d:"Aug 2, 2026", items:[
+    "Each product in the shelf editor now shows what it Treats (pH, alkalinity, calcium, etc.), so the link between a product and its job is visible instead of hidden.",
+    "Products outside the automated plan are marked \u201cTracking only.\u201d On a salt pool, liquid chlorine is tracking-only (your cell makes chlorine) and won\u2019t trigger low-stock warnings; pool shock is always tracking-only (added as needed)."
+  ]},
   {v:"1.14.0", d:"Aug 2, 2026", items:[
     "Backup & Restore is now front and center at the top of Settings — one tap to save a dated backup file, one to restore (replaces all current data, with confirmation). The dashboard nudges you if you haven\u2019t backed up recently. Always back up before deploying an update.",
     "Inventory tracker on the dashboard: quantity on hand for each product with − / + buttons. Set brand, where you bought it, and a low-stock alert level in Settings. Amounts you check off in a test subtract automatically.",
@@ -1932,6 +1936,16 @@ function renderSeasonEditor(){
 /* ============ INVENTORY ============ */
 /* Which shelf products to show in the on-hand tracker, in display order. */
 const INV_ORDER = ["acid","chlorine","shock","cya","calcium","bicarb","phup","salt"];
+/* Single source of truth: is this product outside the automated treatment plan?
+   Salt cell makes chlorine (so liquid chlorine is backup-only on salt pools); shock is always as-needed;
+   salt only matters on a salt pool. Keep in sync with the ROLE map in renderShelf. */
+function isTrackingOnly(k){
+  const salt = S.profile.sanitizer==="salt";
+  if(k==="shock") return true;
+  if(k==="chlorine") return salt;      // salt pool → chlorine is tracking-only
+  if(k==="salt") return !salt;         // chlorine pool → salt is irrelevant
+  return false;
+}
 function renderInventory(){
   const el = $("dash-inventory"); if(!el) return;
   const items = INV_ORDER.filter(k=>S.shelf[k]).map(k=>({k, it:S.shelf[k]}));
@@ -1941,13 +1955,15 @@ function renderInventory(){
     '<div id="inv-list" style="margin-top:10px">'+
       items.map(({k,it})=>{
         const u = unitOf(it);
-        const low = it.lowAt>0 && it.qty<=it.lowAt;
+        const trackOnly = isTrackingOnly(k);
+        const low = !trackOnly && it.lowAt>0 && it.qty<=it.lowAt;  // no low-stock nag for tracking-only items
         const sub = [it.brand, it.store].filter(Boolean).join(" · ");
-        // show purchase-unit equivalent in parens when a conversion is set
         const buyEq = (it.buyUnit && it.buyQty>0) ? ' <span class="muted small">('+(Math.round(it.qty/it.buyQty*100)/100)+' '+esc(it.buyUnit)+')</span>' : '';
+        const tag = low ? ' <span class="chip bad" style="font-size:11px">Low</span>'
+                  : trackOnly ? ' <span class="chip" style="font-size:11px;background:var(--line)">Tracking only</span>' : '';
         return '<div class="invrow" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)">'+
           '<div style="flex:1;min-width:0">'+
-            '<div style="font-weight:600">'+esc(it.label)+(low?' <span class="chip bad" style="font-size:11px">Low</span>':'')+'</div>'+
+            '<div style="font-weight:600">'+esc(it.label)+tag+'</div>'+
             '<div style="font-family:\'IBM Plex Mono\',monospace"><b>'+(Math.round(it.qty*10)/10)+'</b> <span class="muted small">'+esc(u)+'</span>'+buyEq+'</div>'+
             (sub?'<div class="muted small">'+esc(sub)+'</div>':'')+
           '</div>'+
@@ -2013,10 +2029,33 @@ function openQuickAdd(){
 }
 function renderShelf(){
   const cats = {acid:"pH / TA down", phup:"pH up", bicarb:"Alkalinity up", calcium:"Calcium hardness up", cya:"Stabilizer", salt:"Salt", chlorine:"Chlorine", shock:"Pool shock"};
+  const salt = S.profile.sanitizer==="salt";
+  // What each product treats in the dosing engine — shown so the linkage is visible, not hidden in code.
+  // A product is "tracking only" per isTrackingOnly(); those show no dosing role.
+  const ROLE = {
+    acid:    "Lowers pH and alkalinity (from your test or acid-demand drops)",
+    phup:    "Raises pH when it's below the LSI-balanced target",
+    bicarb:  "Raises total alkalinity (TA)",
+    calcium: "Raises calcium hardness (CH)",
+    cya:     "Raises stabilizer (CYA)",
+    salt:    "Raises salinity for the salt cell",
+    chlorine:"Sanitizer — free chlorine (FC)"
+  };
+  const trackingNote = {
+    chlorine:"your salt cell generates chlorine, so a jug is backup only",
+    shock:"added as needed (super-chlorination), not driven by a test",
+    salt:"only relevant on a salt pool"
+  };
   $("shelf-editor").innerHTML = Object.keys(cats).map(k=>{
     const it = S.shelf[k]; const u = unitOf(it);
+    const trackOnly = isTrackingOnly(k);
+    const treatsLine = !trackOnly
+      ? '<div class="chip info" style="margin-top:4px;font-size:11px">Treats: '+esc(ROLE[k])+'</div>'
+      : '<div style="margin-top:4px"><span class="chip" style="font-size:11px;background:var(--line)">Tracking only</span>'+
+        (trackingNote[k]?' <span class="muted small">'+esc(trackingNote[k])+'</span>':'')+'</div>';
     return '<div class="shelfitem" style="display:block;padding:12px 0;border-bottom:1px solid var(--line)">'+
       '<div class="cat" style="font-weight:600">'+cats[k]+'</div>'+
+      treatsLine +
       '<input type="text" data-shelf="'+k+'" data-fld="label" value="'+esc(it.label)+'" placeholder="Product name" style="margin-top:6px">'+
       '<div class="row2" style="margin-top:6px">'+
         '<input type="text" data-shelf="'+k+'" data-fld="brand" value="'+esc(it.brand||"")+'" placeholder="Brand">'+
