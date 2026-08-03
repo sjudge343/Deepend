@@ -159,6 +159,7 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
     <div class="btnrow"><button class="btn primary" onclick="startWizard()">Start a test session</button></div>
   </div>
   <div class="card" id="dash-projection"></div>
+  <div class="card" id="dash-inventory"></div>
   <div class="card" id="dash-filters"></div>
 </section>
 
@@ -227,6 +228,17 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 
 <!-- SETTINGS -->
 <section class="view" id="view-settings">
+  <div class="card" style="border:2px solid var(--water)">
+    <div class="eyebrow">Data safety</div>
+    <h2>Backup &amp; restore</h2>
+    <div class="muted small">Your data lives only on this phone. Back up regularly — and always before deploying an update — so you never lose your history.</div>
+    <div id="backup-status" class="muted small" style="margin-top:8px"></div>
+    <div class="btnrow" style="margin-top:10px">
+      <button class="btn primary" onclick="exportJSON()">Back up my data</button>
+      <button class="btn quiet" onclick="document.getElementById('import-file').click()">Restore from backup</button>
+    </div>
+    <input type="file" id="import-file" accept="application/json" style="display:none" onchange="importJSON(event)">
+  </div>
   <div class="card">
     <div class="eyebrow">Setup</div>
     <h2>Pool profile</h2>
@@ -330,16 +342,14 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
   <div class="card">
     <h2>About</h2>
     <div class="mono small" id="about-version"></div>
+    <div id="about-deploy"></div>
+    <h3 style="margin-top:14px">Release notes</h3>
     <div id="about-notes"></div>
   </div>
 
   <div class="card">
     <h2>Data</h2>
-    <div class="btnrow">
-      <button class="btn quiet" onclick="exportJSON()">Back up (JSON)</button>
-      <button class="btn quiet" onclick="document.getElementById('import-file').click()">Restore</button>
-    </div>
-    <input type="file" id="import-file" accept="application/json" style="display:none" onchange="importJSON(event)">
+    <div class="muted small">Backup and restore are at the top of Settings. Export a spreadsheet of your log from the Log tab.</div>
     <hr class="soft">
     <button class="btn danger" onclick="resetAll()">Erase all data</button>
   </div>
@@ -363,8 +373,17 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.12.0";
+const APP_VERSION = "1.14.0";
 const RELEASE_NOTES = [
+  {v:"1.14.0", d:"Aug 2, 2026", items:[
+    "Backup & Restore is now front and center at the top of Settings — one tap to save a dated backup file, one to restore (replaces all current data, with confirmation). The dashboard nudges you if you haven\u2019t backed up recently. Always back up before deploying an update.",
+    "Inventory tracker on the dashboard: quantity on hand for each product with − / + buttons. Set brand, where you bought it, and a low-stock alert level in Settings. Amounts you check off in a test subtract automatically.",
+    "Added Pool shock (1-lb bags) and clarified Calcium hardness increaser as tracked products.",
+    "\u201cLog a product I added\u201d button records an application outside a test (like shock) \u2014 it subtracts from inventory and shows in your log and weekly usage chart."
+  ]},
+  {v:"1.13.0", d:"Aug 2, 2026", items:[
+    "Added a Deployment guide in Settings \u2192 About: a collapsible reference covering the one-time GitHub + Netlify setup and the step-by-step routine for pushing each new release. Handy to check next time you deploy."
+  ]},
   {v:"1.12.0", d:"Aug 2, 2026", items:[
     "Acid from your demand drops is now a real, checkbox-tracked step in the treatment sequence (\u201cI added this\u201d) \u2014 it replaces the app\u2019s pH-estimate acid so your titration is the logged number. Every product you add is now captured for history.",
     "New Product Usage chart on the Log tab: weekly totals (Sun\u2013Sat) per product with a tap-to-switch selector, plus this-week and 4-week-average figures. See how much acid, stabilizer, etc. you go through week over week."
@@ -441,14 +460,19 @@ const RELEASE_NOTES = [
 ];
 /* ============ STATE ============ */
 const DEFAULT_SHELF = {
-  acid:    {label:"Muriatic acid", strength:31.45, unit:"floz"},
-  phup:    {label:"Soda ash (pH up)", strength:100, unit:"oz"},
-  bicarb:  {label:"Sodium bicarbonate", strength:100, unit:"lb"},
-  calcium: {label:"Calcium chloride", strength:77, unit:"lb"},
-  cya:     {label:"Stabilizer (CYA)", strength:100, unit:"oz"},
-  salt:    {label:"Pool salt", strength:100, unit:"lb"},
-  chlorine:{label:"Liquid chlorine", strength:12.5, unit:"floz"}
+  acid:    {label:"Muriatic acid", strength:31.45, unit:"floz", brand:"", store:"", qty:0, lowAt:0, unitLabel:"fl oz", buyUnit:"gallon", buyQty:128},
+  phup:    {label:"Soda ash (pH up)", strength:100, unit:"oz", brand:"", store:"", qty:0, lowAt:0, unitLabel:"oz", buyUnit:"", buyQty:0},
+  bicarb:  {label:"Sodium bicarbonate", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, unitLabel:"lb", buyUnit:"", buyQty:0},
+  calcium: {label:"Calcium hardness increaser", strength:77, unit:"lb", brand:"", store:"", qty:0, lowAt:0, unitLabel:"lb", buyUnit:"", buyQty:0},
+  cya:     {label:"Stabilizer (CYA)", strength:100, unit:"oz", brand:"", store:"", qty:0, lowAt:0, unitLabel:"oz", buyUnit:"", buyQty:0},
+  salt:    {label:"Pool salt", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, unitLabel:"lb", buyUnit:"40-lb bag", buyQty:40},
+  chlorine:{label:"Liquid chlorine", strength:12.5, unit:"floz", brand:"", store:"", qty:0, lowAt:0, unitLabel:"fl oz", buyUnit:"gallon", buyQty:128},
+  shock:   {label:"Pool shock", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, unitLabel:"lb", buyUnit:"1-lb bag", buyQty:1}
 };
+const UNIT_LABEL = {floz:"fl oz", oz:"oz", lb:"lb"};
+/* Display/consumption unit for a product: user's custom unitLabel, else the internal unit's default. */
+function unitOf(it){ return (it && it.unitLabel && it.unitLabel.trim()) || UNIT_LABEL[it&&it.unit] || (it&&it.unit) || ""; }
+const UNIT_OPTS = [{v:"floz",l:"fl oz"},{v:"oz",l:"oz (weight)"},{v:"lb",l:"lb"}];
 const BLANK = {
   profile:{sanitizer:"salt", combined:"no", gallons:null, spaGallons:null, surface:"plaster",
     ground:"inground", kit:"k2006", avgDepth:5, areaSqFt:null, cellTarget:3200, fillCH:null,
@@ -470,10 +494,18 @@ const CELLS = {
 };
 const SEASON_NAMES = {spring:"Spring", summer:"Summer", fall:"Fall", winter:"Winter"};
 let S = load();
+/* Per-item deep merge so old saved shelf items (missing brand/store/qty/lowAt) inherit new fields. */
+function mergeShelf(saved){
+  const out = JSON.parse(JSON.stringify(DEFAULT_SHELF));
+  if(saved){ Object.keys(out).forEach(k=>{ if(saved[k]) out[k] = Object.assign(out[k], saved[k]); });
+    // keep any custom keys the user might have added
+    Object.keys(saved).forEach(k=>{ if(!out[k]) out[k] = saved[k]; }); }
+  return out;
+}
 function load(){
   try{ const raw = localStorage.getItem("deepend-v1");
     if(raw){ const s = JSON.parse(raw);
-      s.shelf = Object.assign(JSON.parse(JSON.stringify(DEFAULT_SHELF)), s.shelf||{});
+      s.shelf = mergeShelf(s.shelf);
       s.enh = Object.assign({on:false, notes:[]}, s.enh||{});
       s.profile = Object.assign(JSON.parse(JSON.stringify(BLANK.profile)), s.profile||{});
       return Object.assign(JSON.parse(JSON.stringify(BLANK)), s); } }
@@ -1203,6 +1235,8 @@ function logTreatment(){
     entry.bather = wiz.equip.bather||"none";
   }
   S.log.push(entry);
+  // auto-decrement inventory for everything actually added
+  doses.forEach(d=>{ if(d.added) decrementInventory(d.chem, d.amount); });
   save(); wiz=null; showView("dash");
 }
 
@@ -1372,6 +1406,17 @@ function renderLog(){
   if(!S.log.length){ el.innerHTML = '<div class="emptymsg">No sessions logged yet.</div>'; }
   else {
     el.innerHTML = [...S.log].reverse().map(e=>{
+      // Standalone application (Quick add) — no test readings
+      if(e.standalone){
+        const ds = (e.doses||[]).filter(d=>d.added);
+        return '<details class="lentry"><summary><span class="d">'+fmtDate(e.ts)+'</span>'+
+          '<span class="chip info">Added</span></summary>'+
+          '<div class="body">'+ds.map(d=>esc(d.product)+" — "+esc(d.amount)).join("; ")+
+          ' <span class="muted small">(no test — logged directly)</span>'+
+          (e.notes? '<br><span class="muted small">'+esc(e.notes)+'</span>':'')+
+          '<div class="btnrow" style="margin-top:10px">'+
+          '<button class="btn sm danger" onclick="deleteLogEntry('+e.ts+')">Delete</button></div></div></details>';
+      }
       const st = lsiStatus(e.lsi);
       const doses = (e.doses||[]).filter(d=>d.added);
       const eq = e.pump ? ' · pump '+e.pump.hours+'h/'+e.pump.output+'%' : '';
@@ -1418,7 +1463,9 @@ const USAGE_PRODUCTS = [
   {chem:"calcium", label:"Calcium",    unit:"lb"},
   {chem:"bicarb",  label:"Bicarb",     unit:"lb"},
   {chem:"phup",    label:"pH Up",      unit:"oz"},
-  {chem:"salt",    label:"Salt",       unit:"lb"}
+  {chem:"salt",    label:"Salt",       unit:"lb"},
+  {chem:"shock",   label:"Shock",      unit:"lb"},
+  {chem:"chlorine",label:"Chlorine",   unit:"fl oz"}
 ];
 let usageSel = "acid";
 /* Pull a numeric quantity out of a dose amount string, converting lb→oz-of-weight consistently.
@@ -1563,6 +1610,15 @@ function stamp(){ return new Date().toISOString().slice(0,10); }
 function exportJSON(){
   const payload = {app:"deepend", version:APP_VERSION, exportedAt:new Date().toISOString(), data:S};
   downloadFile("deepend-backup-v"+APP_VERSION+"-"+stamp()+".json", JSON.stringify(payload,null,2), "application/json");
+  S.lastBackup = Date.now(); save(); renderBackupStatus();
+  toast("Backup file saved. Keep it somewhere safe.");
+}
+function renderBackupStatus(){
+  const el = $("backup-status"); if(!el) return;
+  if(!S.lastBackup){ el.innerHTML = "⚠ No backup made yet on this device."; return; }
+  const days = Math.floor((Date.now()-S.lastBackup)/86400000);
+  const when = days===0? "today" : days===1? "yesterday" : days+" days ago";
+  el.innerHTML = "Last backup: "+when+" ("+fmtDate(S.lastBackup)+").";
 }
 function importJSON(ev){
   const f = ev.target.files[0]; if(!f) return;
@@ -1570,13 +1626,18 @@ function importJSON(ev){
   rd.onload = () => { try{
       const parsed = JSON.parse(rd.result);
       const data = (parsed && parsed.app==="deepend" && parsed.data) ? parsed.data : parsed; /* v1.1 wrapped or v1.0 raw */
-      S = Object.assign(JSON.parse(JSON.stringify(BLANK)), data);
-      S.shelf = Object.assign(JSON.parse(JSON.stringify(DEFAULT_SHELF)), S.shelf||{});
-      S.enh = Object.assign({on:false, notes:[]}, S.enh||{});
-      S.profile = Object.assign(JSON.parse(JSON.stringify(BLANK.profile)), S.profile||{});
-      save(); bindSettings(); renderAll();
-      toast("Restored"+(parsed.version? " (backup from v"+parsed.version+")":"")+".");
-    }catch(e){ toast("That file didn't parse as a Deep End backup."); } };
+      if(!data || typeof data!=="object" || (!data.profile && !data.log)){ toast("That file didn't look like a Deep End backup."); ev.target.value=""; return; }
+      const logCount = Array.isArray(data.log)? data.log.length : 0;
+      appConfirm("Restore this backup? This will completely REPLACE all current data on this phone ("+logCount+" test"+(logCount===1?"":"s")+" in the file"+(parsed.version?", from v"+parsed.version:"")+").", ()=>{
+        S = Object.assign(JSON.parse(JSON.stringify(BLANK)), data);
+        S.shelf = mergeShelf(S.shelf);
+        S.enh = Object.assign({on:false, notes:[]}, S.enh||{});
+        S.profile = Object.assign(JSON.parse(JSON.stringify(BLANK.profile)), S.profile||{});
+        save(); bindSettings(); renderAll(); renderBackupStatus();
+        toast("Restored — "+logCount+" test"+(logCount===1?"":"s")+" loaded.");
+      }, "Replace everything");
+      ev.target.value = "";
+    }catch(e){ toast("That file didn't parse as a Deep End backup."); ev.target.value=""; } };
   rd.readAsText(f);
 }
 /* ============ ENHANCEMENTS ============ */
@@ -1649,6 +1710,36 @@ function applyFontSize(){
 }
 function renderAbout(){
   $("about-version").textContent = "Deep End v"+APP_VERSION;
+  $("about-deploy").innerHTML =
+    '<details class="lentry" style="margin-top:10px"><summary><span class="d">Deployment guide</span><span class="muted small">tap</span></summary>'+
+    '<div class="body">'+
+
+      '<div class="hint"><b>How this app is hosted.</b> Deep End is a single <span class="mono">index.html</span> file kept in a GitHub repository. Netlify watches that repo and automatically republishes the live site whenever the file changes. You edit on GitHub; Netlify deploys.</div>'+
+
+      '<h3 style="margin-top:12px">Reference details</h3>'+
+      '<div class="small" style="margin-top:4px">• GitHub repo: <span class="mono">github.com/sjudge343/deepend</span></div>'+
+      '<div class="small">• Live site: <span class="mono">deepend1.netlify.app</span></div>'+
+      '<div class="small">• Netlify publish directory: <b>empty</b> (files live at the repo root, not in a subfolder)</div>'+
+
+      '<h3 style="margin-top:14px">A. Initial setup <span class="muted small">(one time — already done)</span></h3>'+
+      '<div class="muted small">Kept here in case you ever rebuild it from scratch.</div>'+
+      '<div class="small" style="margin-top:4px">1. Create a free GitHub account, then a new <b>public</b> repository named <span class="mono">deepend</span> (add a README).</div>'+
+      '<div class="small">2. In <b>Safari</b> (not the GitHub app), open the repo → <b>Add file → Upload files</b> → add <span class="mono">index.html</span> (and the two icon PNGs) at the repo root → <b>Commit changes</b>.</div>'+
+      '<div class="small">3. Go to <span class="mono">app.netlify.com</span> → <b>Add new site → Import an existing project</b> → <b>GitHub</b> → pick the <span class="mono">deepend</span> repo.</div>'+
+      '<div class="small">4. Leave build command blank and <b>publish directory empty</b>, then <b>Deploy</b>. Netlify gives you the live URL.</div>'+
+      '<div class="hint" style="margin-top:6px"><b>Gotcha:</b> if the publish directory is set to a folder name that isn\'t in the repo, every page 404s. Files sit at the repo <b>root</b>, so the publish directory stays <b>empty</b>.</div>'+
+
+      '<h3 style="margin-top:14px">B. Ongoing deploy <span class="muted small">(each new release)</span></h3>'+
+      '<div class="small" style="margin-top:4px">1. Save the new <span class="mono">index.html</span> from the chat to your <b>Files</b> app (it\'s already named correctly).</div>'+
+      '<div class="small">2. In <b>Safari</b>, open <span class="mono">github.com</span> → the <b>deepend</b> repo → <b>Add file → Upload files</b>.</div>'+
+      '<div class="small">3. Select <span class="mono">index.html</span> — uploading the same name <b>overwrites</b> the old one → <b>Commit changes</b>.</div>'+
+      '<div class="small">4. Netlify auto-redeploys in about a minute. Refresh <span class="mono">deepend1.netlify.app</span> to confirm the new version.</div>'+
+      '<div class="hint" style="margin-top:6px"><b>If “Add file” is hidden</b> on mobile: tap <span class="mono">aA</span> in Safari\'s address bar → <b>Request Desktop Website</b>. The GitHub <i>app</i> can\'t upload files — only Safari can.</div>'+
+
+      '<h3 style="margin-top:14px">C. Home-screen icon <span class="muted small">(optional, one time)</span></h3>'+
+      '<div class="small" style="margin-top:4px">For the custom icon instead of a plain tile, upload <span class="mono">apple-touch-icon.png</span> and <span class="mono">icon-512.png</span> to the repo root once (same Upload-files step). Then on iPhone: open the site in Safari → <b>Share → Add to Home Screen</b> (delete any old shortcut first so the icon refreshes).</div>'+
+
+    '</div></details>';
   $("about-notes").innerHTML = RELEASE_NOTES.map((rel,idx)=>
     '<details class="lentry" '+(idx===0?"open":"")+'><summary><span class="d">v'+rel.v+
     ' <span class="muted small">· '+rel.d+'</span></span><span class="muted small">'+(idx===0?"":"tap")+'</span></summary>'+
@@ -1675,6 +1766,11 @@ function renderDash(){
     else if(s.cls==="warn" && /in \d+d/.test(s.txt)) wh += '<div class="warnbar warn">'+esc(f.name)+': '+s.txt+'</div>';
   }));
   if(last && daysBetween(last.ts, Date.now())>4.5) wh += '<div class="warnbar warn">It\'s been '+Math.round(daysBetween(last.ts,Date.now()))+' days since your last test — twice a week keeps the LSI honest.</div>';
+  // Backup nudge — data lives only on this phone
+  if(S.log.length){
+    if(!S.lastBackup) wh += '<div class="warnbar warn">You haven\'t backed up yet. Back up your data in Settings so you don\'t lose your history.</div>';
+    else if((Date.now()-S.lastBackup)/86400000 > 14) wh += '<div class="warnbar warn">Last backup was '+Math.round((Date.now()-S.lastBackup)/86400000)+' days ago — back up again in Settings.</div>';
+  }
   // Staleness nudge for slow-but-drifting params (CH, CYA) — based on last FRESH measurement
   [["cya","CYA",45],["ch","Calcium",60]].forEach(([key,label,limitDays])=>{
     const freshTs = lastFreshMeasure(key);
@@ -1713,6 +1809,7 @@ function renderDash(){
       return '<div class="fitem"><div class="nm">'+esc(f.name)+'</div><div>'+st+'</div></div>'; }).join("")
     : '<div class="muted small">Add your filters in the Filters tab to get cleaning and replacement warnings here.</div>');
   renderProjection();
+  renderInventory();
 }
 
 /* Offer to update a season's preset once, at season end, if data showed a persistent lean. */
@@ -1765,6 +1862,7 @@ function numBind(id, key){
   el.onchange = ()=>{ S.profile[key] = el.value===""? null : Number(el.value); save(); };
 }
 function bindSettings(){
+  renderBackupStatus();
   segBind("seg-sanitizer","sanitizer", ()=>{ toggleSaltUI(); renderAll(); });
   segBind("seg-combined","combined", ()=>{ $("spa-gal-wrap").style.display = S.profile.combined==="yes"?"block":"none"; });
   segBind("seg-surface","surface"); segBind("seg-ground","ground");
@@ -1831,18 +1929,115 @@ function renderSeasonEditor(){
     };
   });
 }
+/* ============ INVENTORY ============ */
+/* Which shelf products to show in the on-hand tracker, in display order. */
+const INV_ORDER = ["acid","chlorine","shock","cya","calcium","bicarb","phup","salt"];
+function renderInventory(){
+  const el = $("dash-inventory"); if(!el) return;
+  const items = INV_ORDER.filter(k=>S.shelf[k]).map(k=>({k, it:S.shelf[k]}));
+  el.innerHTML =
+    '<div class="eyebrow">Supplies</div><h2>Inventory</h2>'+
+    '<div class="muted small">On-hand amounts. <b>−/+ are corrections</b> (fixing a wrong count) — they don\'t log usage. Use <b>Restock</b> when you buy more, and <b>Log a product</b> when you apply some.</div>'+
+    '<div id="inv-list" style="margin-top:10px">'+
+      items.map(({k,it})=>{
+        const u = unitOf(it);
+        const low = it.lowAt>0 && it.qty<=it.lowAt;
+        const sub = [it.brand, it.store].filter(Boolean).join(" · ");
+        // show purchase-unit equivalent in parens when a conversion is set
+        const buyEq = (it.buyUnit && it.buyQty>0) ? ' <span class="muted small">('+(Math.round(it.qty/it.buyQty*100)/100)+' '+esc(it.buyUnit)+')</span>' : '';
+        return '<div class="invrow" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)">'+
+          '<div style="flex:1;min-width:0">'+
+            '<div style="font-weight:600">'+esc(it.label)+(low?' <span class="chip bad" style="font-size:11px">Low</span>':'')+'</div>'+
+            '<div style="font-family:\'IBM Plex Mono\',monospace"><b>'+(Math.round(it.qty*10)/10)+'</b> <span class="muted small">'+esc(u)+'</span>'+buyEq+'</div>'+
+            (sub?'<div class="muted small">'+esc(sub)+'</div>':'')+
+          '</div>'+
+          '<button class="btn sm quiet" onclick="adjustQty(\''+k+'\',-1)" title="correct the count down">−</button>'+
+          '<button class="btn sm quiet" onclick="adjustQty(\''+k+'\',1)" title="correct the count up">+</button>'+
+          '<button class="btn sm quiet" onclick="openRestock(\''+k+'\')">Restock</button>'+
+        '</div>';
+      }).join("")+
+    '</div>'+
+    '<div class="btnrow" style="margin-top:10px"><button class="btn quiet" onclick="openQuickAdd()">+ Log a product I added</button></div>';
+}
+/* Manual +/- : a COUNT CORRECTION only. Does NOT log usage or touch history.
+   Steps by 1 in the consumption unit (fine-grained; use Restock for buying a whole container). */
+function adjustQty(k, dir){
+  const it = S.shelf[k]; if(!it) return;
+  it.qty = Math.max(0, Math.round((Number(it.qty||0) + dir*1)*10)/10);
+  save(); renderInventory(); renderDash();
+}
+/* Restock: add stock in the PURCHASE unit (converts to consumption units). Not usage — just adds on-hand. */
+function openRestock(k){
+  const it = S.shelf[k]; if(!it) return;
+  const cu = unitOf(it);
+  const opts = [];
+  if(it.buyUnit && it.buyQty>0) opts.push({v:"buy", l:it.buyUnit+" ("+it.buyQty+" "+cu+" each)"});
+  opts.push({v:"cons", l:cu+" (single units)"});
+  appForm("Restock "+it.label, [
+    {key:"unit", label:"Add in", type:"select", options:opts, value:opts[0].v},
+    {key:"qty", label:"How many", type:"number", step:"0.5", value:""}
+  ], (v)=>{
+    const q = Number(v.qty);
+    if(!q||q<=0){ toast("Enter a quantity."); return; }
+    const add = v.unit==="buy" ? q*it.buyQty : q;
+    it.qty = Math.round((Number(it.qty||0) + add)*10)/10;
+    save(); renderInventory(); renderDash();
+    toast("Added "+Math.round(add*10)/10+" "+cu+" to "+it.label+".");
+  });
+}
+/* Subtract a USED amount from on-hand when a dose is logged (test or quick-add). This IS consumption. */
+function decrementInventory(chem, amountStr){
+  const it = S.shelf[chem]; if(!it) return;
+  const qty = doseQty(amountStr); if(!(qty>0)) return;
+  it.qty = Math.max(0, Math.round((Number(it.qty||0) - qty)*10)/10);
+}
+/* ---- Quick add: log a product APPLIED outside a test (e.g. shock). Logs + decrements + feeds usage. ---- */
+function openQuickAdd(){
+  const opts = INV_ORDER.filter(k=>S.shelf[k]).map(k=>({v:k, l:S.shelf[k].label+" ("+unitOf(S.shelf[k])+")"}));
+  appForm("Log a product added", [
+    {key:"prod", label:"Product", type:"select", options:opts, value:opts[0].v},
+    {key:"amt", label:"Amount added", type:"number", step:"0.5", value:""},
+    {key:"date", label:"Date", type:"date", value:new Date().toISOString().slice(0,10)}
+  ], (v)=>{
+    const k=v.prod, amt=Number(v.amt);
+    if(!amt||amt<=0){ toast("Enter an amount."); return; }
+    const it=S.shelf[k], u=unitOf(it);
+    const ts = v.date ? new Date(v.date+"T12:00:00").getTime() : Date.now();
+    const amountStr = amt+" "+u;
+    S.log.push({ts, standalone:true, readings:{}, doses:[{chem:k, product:it.label, amount:amountStr, added:true}], notes:"Added outside a test session."});
+    decrementInventory(k, amountStr);
+    S.log.sort((a,b)=>a.ts-b.ts);
+    save(); renderAll();
+    toast("Logged "+amountStr+" of "+it.label+".");
+  });
+}
 function renderShelf(){
-  const cats = {acid:"pH / TA down", phup:"pH up", bicarb:"Alkalinity up", calcium:"Calcium up", cya:"Stabilizer", salt:"Salt", chlorine:"Chlorine"};
+  const cats = {acid:"pH / TA down", phup:"pH up", bicarb:"Alkalinity up", calcium:"Calcium hardness up", cya:"Stabilizer", salt:"Salt", chlorine:"Chlorine", shock:"Pool shock"};
   $("shelf-editor").innerHTML = Object.keys(cats).map(k=>{
-    const it = S.shelf[k];
-    return '<div class="shelfitem"><div class="cat">'+cats[k]+'</div>'+
-      '<input type="text" data-shelf="'+k+'" data-fld="label" value="'+esc(it.label)+'">'+
-      '<input type="number" data-shelf="'+k+'" data-fld="strength" value="'+it.strength+'" step="0.05" inputmode="decimal" title="strength %">'+
+    const it = S.shelf[k]; const u = unitOf(it);
+    return '<div class="shelfitem" style="display:block;padding:12px 0;border-bottom:1px solid var(--line)">'+
+      '<div class="cat" style="font-weight:600">'+cats[k]+'</div>'+
+      '<input type="text" data-shelf="'+k+'" data-fld="label" value="'+esc(it.label)+'" placeholder="Product name" style="margin-top:6px">'+
+      '<div class="row2" style="margin-top:6px">'+
+        '<input type="text" data-shelf="'+k+'" data-fld="brand" value="'+esc(it.brand||"")+'" placeholder="Brand">'+
+        '<input type="text" data-shelf="'+k+'" data-fld="store" value="'+esc(it.store||"")+'" placeholder="Where bought">'+
+      '</div>'+
+      '<div class="row2" style="margin-top:6px">'+
+        '<div><label class="f">Strength %</label><input type="number" data-shelf="'+k+'" data-fld="strength" value="'+it.strength+'" step="0.05" inputmode="decimal"></div>'+
+        '<div><label class="f">Consumption unit</label><input type="text" data-shelf="'+k+'" data-fld="unitLabel" value="'+esc(it.unitLabel||"")+'" placeholder="e.g. fl oz"></div>'+
+      '</div>'+
+      '<div class="row2" style="margin-top:6px">'+
+        '<div><label class="f">Purchase unit</label><input type="text" data-shelf="'+k+'" data-fld="buyUnit" value="'+esc(it.buyUnit||"")+'" placeholder="e.g. gallon"></div>'+
+        '<div><label class="f">'+esc(u)+' per '+(it.buyUnit?esc(it.buyUnit):"purchase")+'</label><input type="number" data-shelf="'+k+'" data-fld="buyQty" value="'+(it.buyQty||0)+'" step="0.5" inputmode="decimal"></div>'+
+      '</div>'+
+      '<div style="margin-top:6px"><label class="f">Low-stock alert ('+esc(u)+')</label><input type="number" data-shelf="'+k+'" data-fld="lowAt" value="'+(it.lowAt||0)+'" step="0.5" inputmode="decimal"></div>'+
+      '<div class="muted small" style="margin-top:4px">Tracked &amp; used in <b>'+esc(u)+'</b>'+(it.buyUnit&&it.buyQty>0?'; bought as <b>'+esc(it.buyUnit)+'</b> = '+it.buyQty+' '+esc(u):'')+'.</div>'+
       '</div>';
   }).join("");
   $("shelf-editor").querySelectorAll("input").forEach(inp=>{
-    inp.onchange = ()=>{ const it = S.shelf[inp.dataset.shelf];
-      it[inp.dataset.fld] = inp.dataset.fld==="strength"? Number(inp.value): inp.value; save(); };
+    inp.onchange = ()=>{ const it = S.shelf[inp.dataset.shelf], f = inp.dataset.fld;
+      it[f] = (f==="strength"||f==="lowAt"||f==="buyQty")? Number(inp.value) : inp.value; save();
+      renderShelf(); renderInventory(); renderDash(); };
   });
 }
 function useMyLocation(){
