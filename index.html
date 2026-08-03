@@ -373,8 +373,11 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.17.0";
+const APP_VERSION = "1.18.0";
 const RELEASE_NOTES = [
+  {v:"1.18.0", d:"Aug 2, 2026", items:[
+    "Inventory still never goes negative, but now when you apply more of a product than you had on hand, it flags the item \u201cCount may be off\u201d instead of silently absorbing the difference \u2014 a reminder that your on-hand number needs correcting. The flag clears once you correct the count up or restock."
+  ]},
   {v:"1.17.0", d:"Aug 2, 2026", items:[
     "New \u201cEdit doses\u201d button on any logged test: reopen the treatment plan to check off a product you added later, uncheck one marked in error, or adjust the amount to what you actually poured (in case it differed from the recommendation). Assumes the same day as the test.",
     "Inventory and the usage chart update by the change only \u2014 checking a dose subtracts stock, unchecking adds it back, and editing an amount corrects the difference, so reopening never double-counts."
@@ -1616,6 +1619,7 @@ function editDoses(ts){
     }).join("");
   $("form-modal-cancel").onclick = ()=>{ m.style.display="none"; };
   $("form-modal-save").onclick = ()=>{
+    let anyShort = false;
     doses.forEach((d,i)=>{
       const ck = $("ed-ck-"+i), amtEl = $("ed-amt-"+i);
       const nowAdded = ck.checked;
@@ -1625,8 +1629,11 @@ function editDoses(ts){
       const newApplied = nowAdded ? nowQty : 0;
       const oldApplied = d.appliedQty!=null ? d.appliedQty : (d.added? doseQty(d.amount):0);
       const delta = newApplied - oldApplied;           // >0 = use more stock, <0 = give back
-      if(delta!==0 && S.shelf[d.chem]){
-        S.shelf[d.chem].qty = Math.max(0, Math.round((Number(S.shelf[d.chem].qty||0) - delta)*10)/10);
+      const sh = S.shelf[d.chem];
+      if(delta!==0 && sh){
+        const after = Number(sh.qty||0) - delta;
+        sh.qty = Math.max(0, Math.round(after*10)/10);
+        if(delta>0 && after < -0.05){ sh.shortfall = true; anyShort = true; }  // used more than was on hand
       }
       d.added = nowAdded;
       d.amount = nowAdded ? (nowQty+" "+u) : d.amount;  // record actual amount when added
@@ -1634,7 +1641,8 @@ function editDoses(ts){
     });
     m.style.display="none";
     save(); renderLog(); renderDash();
-    toast("Updated what you added — inventory adjusted.");
+    if(anyShort) toast("Updated — but an amount exceeded what was on hand. Inventory count may be off; correct it on the dashboard.");
+    else toast("Updated what you added — inventory adjusted.");
   };
   m.style.display="flex";
 }
@@ -2023,11 +2031,14 @@ function renderInventory(){
         const buyEq = (it.buyUnit && it.buyQty>0) ? ' <span class="muted small">('+(Math.round(it.qty/it.buyQty*100)/100)+' '+esc(it.buyUnit)+')</span>' : '';
         const tag = low ? ' <span class="chip bad" style="font-size:11px">Low</span>'
                   : trackOnly ? ' <span class="chip" style="font-size:11px;background:var(--line)">Tracking only</span>' : '';
+        const shortFlag = it.shortfall ? ' <span class="chip bad" style="font-size:11px">Count may be off</span>' : '';
+        const shortNote = it.shortfall ? '<div class="muted small" style="color:var(--danger,#b23)">An application used more than was on hand — set the correct amount with − / + or Restock.</div>' : '';
         return '<div class="invrow" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)">'+
           '<div style="flex:1;min-width:0">'+
-            '<div style="font-weight:600">'+esc(it.label)+tag+'</div>'+
+            '<div style="font-weight:600">'+esc(it.label)+tag+shortFlag+'</div>'+
             '<div style="font-family:\'IBM Plex Mono\',monospace"><b>'+(Math.round(it.qty*10)/10)+'</b> <span class="muted small">'+esc(u)+'</span>'+buyEq+'</div>'+
             (sub?'<div class="muted small">'+esc(sub)+'</div>':'')+
+            shortNote+
           '</div>'+
           '<button class="btn sm quiet" onclick="adjustQty(\''+k+'\',-1)" title="correct the count down">−</button>'+
           '<button class="btn sm quiet" onclick="adjustQty(\''+k+'\',1)" title="correct the count up">+</button>'+
@@ -2042,6 +2053,7 @@ function renderInventory(){
 function adjustQty(k, dir){
   const it = S.shelf[k]; if(!it) return;
   it.qty = Math.max(0, Math.round((Number(it.qty||0) + dir*1)*10)/10);
+  if(it.qty > 0 && dir > 0) it.shortfall = false;  // corrected upward — count no longer under water
   save(); renderInventory(); renderDash();
 }
 /* Restock: add stock in the PURCHASE unit (converts to consumption units). Not usage — just adds on-hand. */
@@ -2059,15 +2071,23 @@ function openRestock(k){
     if(!q||q<=0){ toast("Enter a quantity."); return; }
     const add = v.unit==="buy" ? q*it.buyQty : q;
     it.qty = Math.round((Number(it.qty||0) + add)*10)/10;
+    if(it.qty > 0) it.shortfall = false;  // restocked — clear the "count was off" flag
     save(); renderInventory(); renderDash();
     toast("Added "+Math.round(add*10)/10+" "+cu+" to "+it.label+".");
   });
 }
 /* Subtract a USED amount from on-hand when a dose is logged (test or quick-add). This IS consumption. */
 function decrementInventory(chem, amountStr){
-  const it = S.shelf[chem]; if(!it) return;
-  const qty = doseQty(amountStr); if(!(qty>0)) return;
-  it.qty = Math.max(0, Math.round((Number(it.qty||0) - qty)*10)/10);
+  const it = S.shelf[chem]; if(!it) return 0;
+  const qty = doseQty(amountStr); if(!(qty>0)) return 0;
+  const before = Number(it.qty||0);
+  const after = before - qty;
+  it.qty = Math.max(0, Math.round(after*10)/10);
+  if(after < -0.05){                 // had to clamp — recorded count was lower than what was applied
+    it.shortfall = true;             // persistent flag shown on the dashboard row until corrected
+    return Math.round((-after)*10)/10;
+  }
+  return 0;
 }
 /* ---- Quick add: log a product APPLIED outside a test (e.g. shock). Logs + decrements + feeds usage. ---- */
 function openQuickAdd(){
@@ -2082,11 +2102,12 @@ function openQuickAdd(){
     const it=S.shelf[k], u=unitOf(it,k);
     const ts = v.date ? new Date(v.date+"T12:00:00").getTime() : Date.now();
     const amountStr = amt+" "+u;
-    S.log.push({ts, standalone:true, readings:{}, doses:[{chem:k, product:it.label, amount:amountStr, added:true}], notes:"Added outside a test session."});
-    decrementInventory(k, amountStr);
+    S.log.push({ts, standalone:true, readings:{}, doses:[{chem:k, product:it.label, amount:amountStr, added:true, appliedQty:amt}], notes:"Added outside a test session."});
+    const short = decrementInventory(k, amountStr);
     S.log.sort((a,b)=>a.ts-b.ts);
     save(); renderAll();
-    toast("Logged "+amountStr+" of "+it.label+".");
+    if(short>0) toast("Logged "+amountStr+" of "+it.label+" — but only had less than that on hand. Inventory count may be off; correct it on the dashboard.");
+    else toast("Logged "+amountStr+" of "+it.label+".");
   });
 }
 function renderShelf(){
