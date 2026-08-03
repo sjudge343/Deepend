@@ -98,6 +98,7 @@ select{font-family:"Instrument Sans",sans-serif}
 .dose .why{font-size:0.8125rem;color:var(--mist);margin-top:2px}
 .dose .seqn{display:inline-block;background:var(--deepend);color:#fff;font-family:"IBM Plex Mono",monospace;font-size:0.75rem;border-radius:6px;padding:2px 7px;margin-right:8px}
 .dose .wait{font-size:0.75rem;color:var(--amber);margin-top:6px;font-weight:600}
+.dose .warnline{font-size:0.78rem;color:#b23;margin-top:6px;font-weight:600;line-height:1.35}
 .dose label.ck{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:0.875rem;font-weight:600}
 .dose input[type=checkbox]{width:20px;height:20px;accent-color:var(--water)}
 /* filters */
@@ -373,8 +374,13 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.18.0";
+const APP_VERSION = "1.19.0";
 const RELEASE_NOTES = [
+  {v:"1.19.0", d:"Aug 3, 2026", items:[
+    "Smarter sequencing to protect plaster and keep water clear. When a large stabilizer (CYA) dose is due, the app now holds the pH acid — since stabilizer is mildly acidic and lowers pH on its own over 2\u20133 days — and tells you to re-test pH in a few days before adding acid, so you don\u2019t overshoot low.",
+    "Inline interaction warnings on the treatment steps: calcium and acid (permanent-cloudiness risk), calcium and soda ash, and calcium and shock must be added several hours apart. Wait times lengthen automatically in warm water (>85\u00b0F). Pool shock carries a handling-safety note.",
+    "These cautions appear right on the step where you\u2019re about to act, in red, so the timing is clear in the moment."
+  ]},
   {v:"1.18.0", d:"Aug 2, 2026", items:[
     "Inventory still never goes negative, but now when you apply more of a product than you had on hand, it flags the item \u201cCount may be off\u201d instead of silently absorbing the difference \u2014 a reminder that your on-hand number needs correcting. The flag clears once you correct the count up or restock."
   ]},
@@ -798,6 +804,14 @@ function buildPlan(r){
   phT = Math.round(Math.max(7.2, Math.min(7.8, phT))*10)/10;
   let acidForTA = false;
 
+  /* CYA/acid coordination (v1.19): a large stabilizer dose is mildly acidic and pulls pH DOWN
+     gradually as it dissolves over ~2-3 days (cyanuric acid pKa 6.88). If we also add a full acid
+     dose today based on the current pH, the two stack and overshoot low — which is what happens
+     when catching CYA up from a low reading. So when a BIG CYA dose is due, defer the pH-acid:
+     add CYA now, re-test pH in a few days, then dose acid. Threshold: CYA rising by >15 ppm. */
+  const cyaAdd = (cya < t.cya.lo) ? (t.cya.ideal - cya) : 0;
+  const bigCyaDose = cyaAdd > 15;
+
   /* 1. Alkalinity first — it steers everything else */
   if(ta < t.ta.lo){
     const d = t.ta.ideal - ta;
@@ -830,11 +844,19 @@ function buildPlan(r){
     /* handled above */
   } else if(ph > phT + 0.1 && !acidForTA){
     const d = ph - phT;
-    plan.push({chem:"acid", product:sh.acid.label+" ("+acidStr+"%)",
-      amount:fmtFlOz(d/0.2*26*(Math.max(ta,50)/100)*k*acidMult), raw:-d,
-      why:"Lower pH "+fmt1(ph)+" → "+fmt1(phT)+" (lands LSI near "+(lsiT>0?"+":"")+fmt2(lsiT)+")",
-      how:"Pour slowly into the deep end with the pump running. Never mix with chlorine.",
-      wait:"Retest after 30 min of circulation."});
+    if(bigCyaDose){
+      // Defer acid: the large CYA dose will pull pH down on its own over the next few days.
+      plan.push({chem:"note", product:"Hold the acid for now",
+        amount:"Re-test pH in 3–4 days", raw:0,
+        why:"You're adding a large amount of stabilizer, which is mildly acidic and will lower pH gradually as it dissolves over 2–3 days. Adding a full acid dose today on top of that would likely overshoot and drive pH too low.",
+        how:"Add the stabilizer now (step 1). Let it dissolve and re-test pH in 3–4 days, then add acid only if pH is still above "+fmt1(phT)+". This prevents the double pH drop.", wait:""});
+    } else {
+      plan.push({chem:"acid", product:sh.acid.label+" ("+acidStr+"%)",
+        amount:fmtFlOz(d/0.2*26*(Math.max(ta,50)/100)*k*acidMult), raw:-d,
+        why:"Lower pH "+fmt1(ph)+" → "+fmt1(phT)+" (lands LSI near "+(lsiT>0?"+":"")+fmt2(lsiT)+")",
+        how:"Pour slowly into the deep end with the pump running. Never mix with chlorine.",
+        wait:"Retest after 30 min of circulation."});
+    }
   } else if(ph < phT - 0.1){
     const d = phT - ph;
     plan.push({chem:"phup", product:sh.phup.label,
@@ -866,7 +888,8 @@ function buildPlan(r){
     plan.push({chem:"cya", product:sh.cya.label,
       amount:(Math.round(d/10*13*k))+" oz by weight", raw:d,
       why:"Raise CYA "+cya+" → "+t.cya.ideal+" ppm",
-      how:"Put granules in a sock hung in front of a return jet; squeeze occasionally. Dissolves over ~24 h.",
+      how:"Put granules in a sock hung in front of a return jet; squeeze occasionally. Dissolves over ~24 h."+
+        (bigCyaDose?" This is a large dose — it will also pull pH down as it dissolves, so hold off on acid (see note above) and re-test pH in 3–4 days.":""),
       wait:"Don't retest CYA for 3–4 days — it reads low until fully dissolved."});
   } else if(cya > t.cya.hi + 20){
     plan.push({chem:"note", product:"CYA high ("+cya+" ppm)",
@@ -889,6 +912,29 @@ function buildPlan(r){
         why:"Above the cell's happy range.", how:"Partial drain/refill or rain dilution.", wait:""});
     }
   }
+  /* Inline interaction warnings (v1.19): flag conflicting products that must be separated in time.
+     Single post-pass so the rules live in one place and survive step changes. Warm water (>85°F,
+     common here) accelerates precipitation, so we lengthen the recommended separation. */
+  const has = (c)=> plan.some(x=>x.chem===c);
+  const warm = Number(r.temp) > 85;
+  const sep = warm ? "several hours (longer in warm water — give it a full turnover)" : "several hours";
+  const addWarn = (chem, text)=>{ const s = plan.find(x=>x.chem===chem); if(s) s.warn = (s.warn? s.warn+" ":"") + text; };
+  if(has("calcium")){
+    // Calcium + acid → calcium sulfate precipitate = PERMANENT cloudiness. The serious one.
+    if(has("acid")){ addWarn("calcium","⚠ Keep the calcium and the acid at least "+sep+" apart — added together they form a precipitate that can cloud the water permanently.");
+                     addWarn("acid","⚠ Never add acid and calcium close together — separate by "+sep+" to avoid permanent cloudiness."); }
+    // Calcium + soda ash (pH up) → calcium carbonate haze.
+    if(has("phup")){ addWarn("calcium","⚠ Separate from the pH-up (soda ash) by "+sep+" — together they can form a milky calcium-carbonate haze.");
+                     addWarn("phup","⚠ Keep the soda ash and calcium "+sep+" apart to avoid a cloudy haze."); }
+    // Calcium + shock (cal-hypo) → cloudiness.
+    if(has("shock")){ addWarn("calcium","⚠ Don't add calcium and shock together — separate by "+sep+".");
+                      addWarn("shock","⚠ Keep shock and calcium "+sep+" apart — together they can cloud the water."); }
+    // Warm-water reminder even if calcium is the only heavy addition
+    if(warm && !has("acid") && !has("phup") && !has("shock")) addWarn("calcium","In warm water (>85°F), give extra circulation time before the next addition.");
+  }
+  // Cal-hypo storage/handling safety on the shock step.
+  if(has("shock")) addWarn("shock","Handle dry: keep cal-hypo shock away from leaves, acid, and any organic debris — it can react and ignite. Pre-dissolve in water, never mix with other products.");
+
   /* sequence numbers */
   let n=1; plan.forEach(x=>{ if(x.chem!=="note") x.seq=n++; });
   return plan;
@@ -1175,6 +1221,7 @@ function renderReview(){
       '<div class="amt">'+esc(d.amount)+'</div>'+
       '<div class="why">'+esc(d.why)+'</div>'+
       '<div class="small" style="margin-top:6px">'+esc(d.how)+'</div>'+
+      (d.warn?('<div class="warnline">'+esc(d.warn)+'</div>'):"")+
       (d.wait?('<div class="wait">⏱ '+esc(d.wait)+'</div>'):"")+
       (d.chem!=="note"?('<label class="ck"><input type="checkbox" id="dose-ck-'+i+'" checked> I added this</label>'):"")+
     '</div>').join("")
