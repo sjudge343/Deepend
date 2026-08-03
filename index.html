@@ -381,8 +381,11 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.24.0";
+const APP_VERSION = "1.25.0";
 const RELEASE_NOTES = [
+  {v:"1.25.0", d:"Aug 3, 2026", items:[
+    "Reminder cards on Today now have a \u201cReschedule\u201d button right on the card \u2014 tap it to pick a new date without opening the full form. Handy when a shipment slips a day."
+  ]},
   {v:"1.24.0", d:"Aug 3, 2026", items:[
     "You can now set an apply-reminder from \u201cEdit doses\u201d on any logged test \u2014 not just at the moment you finish a test. Reopen a past test, and for anything you skipped, tick \u201cRemind me to apply this\u201d and pick a date. It lands on Today.",
     "Reminder dates are editable. If a shipment is delayed, open the reminder and choose \u201cNot yet \u2014 remind me another day\u201d to push it out, or change the date directly in Edit doses. Recording the application still closes it out."
@@ -2102,13 +2105,28 @@ function renderToday(){
       (last? "Water was last tested "+fmtDate(last.ts)+". I\'ll let you know when something\'s due." : "Nothing due right now.")+'</div>';
     return;
   }
-  el.innerHTML = tasks.map((t,i)=>
-    '<div class="taskrow" style="border:1px solid var(--line);border-left:4px solid '+(t.cls==="bad"?"#b23":"var(--amber)")+';border-radius:12px;padding:12px;margin-top:10px">'+
+  el.innerHTML = tasks.map((t,i)=>{
+    const canResched = (t.action.kind==="applyProduct" || t.action.kind==="acidFollowup") && t.action.taskId;
+    const reschedBtn = canResched ? '<button class="btn sm quiet" onclick="rescheduleTask(\''+t.action.taskId+'\')">Reschedule</button>' : '';
+    return '<div class="taskrow" style="border:1px solid var(--line);border-left:4px solid '+(t.cls==="bad"?"#b23":"var(--amber)")+';border-radius:12px;padding:12px;margin-top:10px">'+
       '<div style="font-weight:600">'+esc(t.title)+'</div>'+
       (t.detail?'<div class="muted small" style="margin-top:3px">'+esc(t.detail)+'</div>':'')+
-      '<div class="btnrow" style="margin-top:10px"><button class="btn sm primary" onclick="runTaskAction(TODAY_ACTIONS['+i+'])">'+taskCta(t.action.kind)+'</button></div>'+
-    '</div>'
-  ).join("");
+      '<div class="btnrow" style="margin-top:10px"><button class="btn sm primary" onclick="runTaskAction(TODAY_ACTIONS['+i+'])">'+taskCta(t.action.kind)+'</button>'+reschedBtn+'</div>'+
+    '</div>';
+  }).join("");
+}
+/* Reschedule a reminder's due date directly from its Today card (e.g. shipment delayed). */
+function rescheduleTask(taskId){
+  const t = (S.tasks||[]).find(x=>x.id===taskId); if(!t) return;
+  const cur = new Date(t.dueTs).toISOString().slice(0,10);
+  appForm("Reschedule reminder", [
+    {key:"when", label:"Remind me on", type:"date", value:cur}
+  ], (v)=>{
+    if(!v.when){ toast("Pick a date."); return; }
+    t.dueTs = new Date(v.when+"T09:00:00").getTime();
+    save(); renderAll(); if($("view-today")&&$("view-today").classList.contains("active")) renderToday();
+    toast("Reminder moved to "+fmtDate(t.dueTs)+".");
+  });
 }
 /* Deferred-acid follow-up: re-test pH a few days after a big CYA dose, then add acid (or not).
    Records what actually happened, decrements inventory, feeds usage, and clears the task. */
