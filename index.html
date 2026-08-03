@@ -384,8 +384,11 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.30.0";
+const APP_VERSION = "1.31.0";
 const RELEASE_NOTES = [
+  {v:"1.31.0", d:"Aug 3, 2026", items:[
+    "The low-stock alert is now set in the package unit you buy in \u2014 pounds for dry products, gallons for liquids \u2014 instead of the internal dosing unit. So you\u2019d set soda ash to alert at, say, 1 lb rather than 16 oz. Your existing alert values were converted automatically."
+  ]},
   {v:"1.30.0", d:"Aug 3, 2026", items:[
     "Inventory now shows what you have in purchase terms: gallons and fluid ounces for liquids (e.g. 2 gal 64 fl oz), pounds and ounces for dry products (e.g. 5 lb 8 oz), and whole pounds for salt. The dosing unit is just used behind the scenes when you apply.",
     "New per-product Minimum dose setting in the shelf. Doses round down to it, so you never get an unmeasurable fraction \u2014 e.g. with a 4-oz minimum, a 10-oz need becomes 8 oz. If the need is smaller than one increment, the plan says there\u2019s nothing to add rather than chasing a trivial amount.",
@@ -592,11 +595,25 @@ function deriveBuyFields(it, k){
     it.buyUnit = ""; it.buyQty = 0;
   }
 }
+/* Low-stock alert is entered/stored in the PACKAGE unit (lb, gal) — matching how the user buys —
+   and converted to tracking units only for the on-hand comparison (v1.31). */
+function lowUnitLabel(it){
+  const pu = it && it.pkgUnit;
+  if(pu==="gal") return "gal";
+  if(pu==="floz") return "fl oz";
+  if(pu==="oz") return "oz";
+  return "lb";   // default/most dry products
+}
+/* Convert a low-stock threshold expressed in the package unit into tracking units, for comparison. */
+function lowAtTracking(it, k){
+  const v = Number(it && it.lowAt)||0; if(v<=0) return 0;
+  return pkgToTracking(k, it.pkgUnit || "lb", v);
+}
 const BLANK = {
   profile:{sanitizer:"salt", combined:"no", gallons:null, spaGallons:null, surface:"plaster",
     ground:"inground", kit:"k2006", avgDepth:5, areaSqFt:null, cellTarget:3200, fillCH:null,
     lat:null, lon:null, cyaTarget:50, fcMin:2, fcMax:5, fontSize:"medium", ozPerDrop:10,
-    cell:"t15", cellEffFactor:null,
+    cell:"t15", cellEffFactor:null, lowAtPkgMigrated:false,
     seasonStarts:{spring:3, summer:6, fall:9, winter:12},
     seasons:{
       spring:{hours:8, output:50}, summer:{hours:10, output:60},
@@ -630,6 +647,15 @@ function load(){
       s.enh = Object.assign({on:false, notes:[]}, s.enh||{});
       if(!Array.isArray(s.tasks)) s.tasks = [];
       s.profile = Object.assign(JSON.parse(JSON.stringify(BLANK.profile)), s.profile||{});
+      // One-time migration (v1.31): lowAt used to be stored in TRACKING units; convert to PACKAGE units.
+      if(!s.profile.lowAtPkgMigrated){
+        Object.keys(s.shelf).forEach(k=>{
+          const it = s.shelf[k]; if(!it || !(it.lowAt>0)) return;
+          const perPkgTracking = pkgToTracking(k, it.pkgUnit||"lb", 1) || 1;  // tracking units in ONE package unit
+          it.lowAt = Math.round((it.lowAt / perPkgTracking)*100)/100;         // tracking → package unit
+        });
+        s.profile.lowAtPkgMigrated = true;
+      }
       return Object.assign(JSON.parse(JSON.stringify(BLANK)), s); } }
   catch(e){ console.warn("load failed", e); }
   return JSON.parse(JSON.stringify(BLANK));
@@ -2635,7 +2661,8 @@ function renderInventory(){
       items.map(({k,it})=>{
         const u = unitOf(it,k);
         const trackOnly = isTrackingOnly(k);
-        const low = !trackOnly && it.lowAt>0 && it.qty<=it.lowAt;  // no low-stock nag for tracking-only items
+        const lowThresh = lowAtTracking(it, k);   // package-unit alert → tracking units
+        const low = !trackOnly && lowThresh>0 && it.qty<=lowThresh;  // no low-stock nag for tracking-only items
         const sub = [it.brand, it.store].filter(Boolean).join(" · ");
         const tag = low ? ' <span class="chip bad" style="font-size:11px">Low</span>'
                   : trackOnly ? ' <span class="chip" style="font-size:11px;background:var(--line)">Tracking only</span>' : '';
@@ -2790,7 +2817,7 @@ function renderShelf(){
         (hasBulk? '<div class="hint" style="margin-top:6px">1 '+esc(it.buyUnit)+' = '+it.buyQty+' '+esc(u)+'.</div>' : '')+
       '</div>'+
       '<div class="row2" style="margin-top:8px">'+
-        '<div><label class="f">Low-stock alert ('+esc(u)+')</label><input type="number" data-shelf="'+k+'" data-fld="lowAt" value="'+(it.lowAt||0)+'" step="0.5" inputmode="decimal"></div>'+
+        '<div><label class="f">Low-stock alert ('+esc(lowUnitLabel(it))+')</label><input type="number" data-shelf="'+k+'" data-fld="lowAt" value="'+(it.lowAt||0)+'" step="0.5" inputmode="decimal"></div>'+
         '<div><label class="f">Minimum dose ('+esc(u)+')</label><input type="number" data-shelf="'+k+'" data-fld="minInc" value="'+(it.minInc||0)+'" step="0.25" inputmode="decimal"></div>'+
       '</div>'+
       '<div class="muted small" style="margin-top:3px">Smallest amount worth adding. Doses round down to this; anything less shows "nothing to add."</div>'+
