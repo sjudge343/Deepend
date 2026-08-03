@@ -384,8 +384,14 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.29.0";
+const APP_VERSION = "1.30.0";
 const RELEASE_NOTES = [
+  {v:"1.30.0", d:"Aug 3, 2026", items:[
+    "Inventory now shows what you have in purchase terms: gallons and fluid ounces for liquids (e.g. 2 gal 64 fl oz), pounds and ounces for dry products (e.g. 5 lb 8 oz), and whole pounds for salt. The dosing unit is just used behind the scenes when you apply.",
+    "New per-product Minimum dose setting in the shelf. Doses round down to it, so you never get an unmeasurable fraction \u2014 e.g. with a 4-oz minimum, a 10-oz need becomes 8 oz. If the need is smaller than one increment, the plan says there\u2019s nothing to add rather than chasing a trivial amount.",
+    "Defaults: salt 1 lb, acid and liquid chlorine 4 fl oz, soda ash / CYA / calcium / bicarb 4 oz, shock 1 lb \u2014 all editable per product.",
+    "The test now asks whether you\u2019re adding shock today. It doesn\u2019t change your other doses, but if you are, the plan reminds you to keep shock apart from acid and calcium (never mix), so a same-day shock doesn\u2019t cloud the water or cause a bad reaction."
+  ]},
   {v:"1.29.0", d:"Aug 3, 2026", items:[
     "Cleaner way to describe the package you buy. Instead of typing a container name and doing the math, you now pick three things: package type (Bag, Jug, Bottle\u2026), unit of measure (pounds, gallons\u2026), and the number. The app converts to its tracking unit for you \u2014 e.g. a 4-lb bag of soda ash becomes 64 oz automatically.",
     "Restocking and cost both work by the package now: enter how many bags and the cost per bag, and the app does bags \u00d7 cost. Your on-hand quantities are untouched by this change."
@@ -531,14 +537,14 @@ const RELEASE_NOTES = [
 ];
 /* ============ STATE ============ */
 const DEFAULT_SHELF = {
-  acid:    {label:"Muriatic acid", strength:31.45, unit:"floz", brand:"", store:"", qty:0, lowAt:0, pkgType:"Jug", pkgUnit:"gal", pkgNum:1, buyUnit:"1-gal jug", buyQty:128},
-  phup:    {label:"Soda ash (pH up)", strength:100, unit:"oz", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:4, buyUnit:"4-lb bag", buyQty:64},
-  bicarb:  {label:"Sodium bicarbonate", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:1, buyUnit:"1-lb bag", buyQty:1},
-  calcium: {label:"Calcium hardness increaser", strength:77, unit:"lb", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:1, buyUnit:"1-lb bag", buyQty:1},
-  cya:     {label:"Stabilizer (CYA)", strength:100, unit:"oz", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:4, buyUnit:"4-lb bag", buyQty:64},
-  salt:    {label:"Pool salt", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:40, buyUnit:"40-lb bag", buyQty:40},
-  chlorine:{label:"Liquid chlorine", strength:12.5, unit:"floz", brand:"", store:"", qty:0, lowAt:0, pkgType:"Jug", pkgUnit:"gal", pkgNum:1, buyUnit:"1-gal jug", buyQty:128},
-  shock:   {label:"Pool shock", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:1, buyUnit:"1-lb bag", buyQty:1}
+  acid:    {label:"Muriatic acid", strength:31.45, unit:"floz", brand:"", store:"", qty:0, lowAt:0, pkgType:"Jug", pkgUnit:"gal", pkgNum:1, buyUnit:"1-gal jug", buyQty:128, minInc:4},
+  phup:    {label:"Soda ash (pH up)", strength:100, unit:"oz", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:4, buyUnit:"4-lb bag", buyQty:64, minInc:4},
+  bicarb:  {label:"Sodium bicarbonate", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:1, buyUnit:"1-lb bag", buyQty:1, minInc:0.25},
+  calcium: {label:"Calcium hardness increaser", strength:77, unit:"lb", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:1, buyUnit:"1-lb bag", buyQty:1, minInc:0.25},
+  cya:     {label:"Stabilizer (CYA)", strength:100, unit:"oz", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:4, buyUnit:"4-lb bag", buyQty:64, minInc:4},
+  salt:    {label:"Pool salt", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:40, buyUnit:"40-lb bag", buyQty:40, minInc:1},
+  chlorine:{label:"Liquid chlorine", strength:12.5, unit:"floz", brand:"", store:"", qty:0, lowAt:0, pkgType:"Jug", pkgUnit:"gal", pkgNum:1, buyUnit:"1-gal jug", buyQty:128, minInc:4},
+  shock:   {label:"Pool shock", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:1, buyUnit:"1-lb bag", buyQty:1, minInc:1}
 };
 /* AUTHORITY: the consumption unit is owned by the app, fixed to match the unit the dosing
    engine writes for each product (see fmtFlOz/fmtLb + the plan.push amounts). NOT user-editable —
@@ -1010,6 +1016,7 @@ function buildPlan(r){
      Single post-pass so the rules live in one place and survive step changes. Warm water (>85°F,
      common here) accelerates precipitation, so we lengthen the recommended separation. */
   const has = (c)=> plan.some(x=>x.chem===c);
+  const shockIntent = has("shock") || !!r.shockToday;   // dosed OR user said they're shocking today
   const warm = Number(r.temp) > 85;
   const sep = warm ? "several hours (longer in warm water — give it a full turnover)" : "several hours";
   const addWarn = (chem, text)=>{ const s = plan.find(x=>x.chem===chem); if(s) s.warn = (s.warn? s.warn+" ":"") + text; };
@@ -1021,13 +1028,50 @@ function buildPlan(r){
     if(has("phup")){ addWarn("calcium","⚠ Separate from the pH-up (soda ash) by "+sep+" — together they can form a milky calcium-carbonate haze.");
                      addWarn("phup","⚠ Keep the soda ash and calcium "+sep+" apart to avoid a cloudy haze."); }
     // Calcium + shock (cal-hypo) → cloudiness.
-    if(has("shock")){ addWarn("calcium","⚠ Don't add calcium and shock together — separate by "+sep+".");
-                      addWarn("shock","⚠ Keep shock and calcium "+sep+" apart — together they can cloud the water."); }
+    if(shockIntent){ addWarn("calcium","⚠ Don't add calcium and shock together — separate by "+sep+"."); }
     // Warm-water reminder even if calcium is the only heavy addition
-    if(warm && !has("acid") && !has("phup") && !has("shock")) addWarn("calcium","In warm water (>85°F), give extra circulation time before the next addition.");
+    if(warm && !has("acid") && !has("phup") && !shockIntent) addWarn("calcium","In warm water (>85°F), give extra circulation time before the next addition.");
   }
-  // Cal-hypo storage/handling safety on the shock step.
-  if(has("shock")) addWarn("shock","Handle dry: keep cal-hypo shock away from leaves, acid, and any organic debris — it can react and ignite. Pre-dissolve in water, never mix with other products.");
+  // Shock separation + safety. Fires whether shock is a computed dose OR the user told us they're shocking today.
+  if(shockIntent){
+    // If shock isn't already a line in the plan (salt pool → tracking only), add an advisory note so the
+    // warnings have somewhere to live and the user is reminded to keep it separated + log what they add.
+    if(!has("shock")){
+      plan.push({chem:"note", product:"Adding shock today — keep it separate", raw:0,
+        why:"You said you're shocking today. It doesn't change the doses above, but add it on its own.",
+        how:"Add shock separately from everything above — never mix with acid, and keep it "+sep+" from any calcium. Pre-dissolve cal-hypo; keep it away from acid and organic debris (it can react and ignite).",
+        wait:""});
+    }
+    if(has("acid")) addWarn("acid","⚠ You're shocking today — never add shock and acid close together. Keep them "+sep+" apart.");
+    if(has("shock")) addWarn("shock","Handle dry: keep cal-hypo shock away from leaves, acid, and any organic debris — it can react and ignite. Pre-dissolve in water, never mix with other products.");
+  }
+
+  /* Minimum-increment pass (v1.30): each product has a user-set smallest practical dose (minInc,
+     in tracking units). Round each real dose DOWN to a whole increment so there are no unmeasurable
+     fractions; if the need is below one full increment, there's nothing practical to add — replace
+     the dose with a short note instead. Keeps the app from chasing trivial amounts. */
+  const snapDoses = [];
+  plan.forEach(x=>{
+    if(x.chem==="note"){ snapDoses.push(x); return; }
+    const sh2 = S.shelf[x.chem];
+    const inc = sh2 && sh2.minInc>0 ? Number(sh2.minInc) : 0;
+    if(!inc){ snapDoses.push(x); return; }          // no increment set → leave as-is
+    const q = doseQty(x.amount);
+    if(!(q>0)){ snapDoses.push(x); return; }
+    const snapped = Math.floor((q + 1e-9) / inc) * inc;
+    if(snapped < inc){
+      // Below one increment — nothing practical to add. Convert to an explanatory note.
+      const uu = unitOf(sh2, x.chem);
+      snapDoses.push({chem:"note", product:x.product+" — nothing to add", amount:"", raw:0,
+        why:"The amount needed ("+ (Math.round(q*100)/100) +" "+uu+") is less than your minimum dose of "+inc+" "+uu+" — too little to add usefully. Leave it and recheck next test.", how:"", wait:""});
+    } else {
+      // Re-express the snapped amount in the product's native format.
+      const tu = CONSUME_UNIT[x.chem];
+      x.amount = tu==="fl oz" ? fmtFlOz(snapped) : tu==="oz" ? (snapped+" oz by weight") : fmtLb(snapped);
+      snapDoses.push(x);
+    }
+  });
+  plan.length = 0; Array.prototype.push.apply(plan, snapDoses);
 
   /* sequence numbers */
   let n=1; plan.forEach(x=>{ if(x.chem!=="note") x.seq=n++; });
@@ -1293,11 +1337,20 @@ function renderEquipStep(){
       ['none','moderate','heavy'].map(b=>'<button data-v="'+b+'"'+(eq.bather===b?' class="on"':'')+'>'+
         (b==="none"?"Normal":b[0].toUpperCase()+b.slice(1))+'</button>').join("")+
     '</div>'+
+    '<label class="f" style="margin-top:10px">Planning to add shock today?</label>'+
+    '<div class="muted small">It won\'t change your pH/alkalinity/calcium doses — but if you\'re shocking, I\'ll remind you to keep it apart from anything it shouldn\'t mix with.</div>'+
+    '<div class="seg" id="eq-shock">'+
+      [['no','No'],['yes','Yes']].map(o=>'<button data-v="'+o[0]+'"'+((eq.shockToday?"yes":"no")===o[0]?' class="on"':'')+'>'+o[1]+'</button>').join("")+
+    '</div>'+
     '<div class="btnrow"><button class="btn quiet" onclick="equipBack()">Back</button>'+
     '<button class="btn primary" onclick="equipNext()">Next</button></div>';
   const seg = $("eq-bather");
   seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{
     wiz.equip.bather=b.dataset.v; seg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
+  });
+  const segS = $("eq-shock");
+  segS.querySelectorAll("button").forEach(b=>b.onclick=()=>{
+    wiz.equip.shockToday = b.dataset.v==="yes"; segS.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
   });
 }
 function equipBack(){ wiz.i--; renderWiz(); }
@@ -1318,7 +1371,8 @@ function toggleDoseReminderDate(i){
   const d = $("dose-rem-date-"+i); if(d) d.style.display = on ? "block" : "none";
 }
 function renderReview(){
-  const r = wiz.r, lsi = computeLSI(r), st = lsiStatus(lsi), plan = buildPlan(r);
+  const r = wiz.r; if(wiz.equip) r.shockToday = !!wiz.equip.shockToday;
+  const lsi = computeLSI(r), st = lsiStatus(lsi), plan = buildPlan(r);
   wiz.plan = plan; wiz.lsi = lsi;
   const doses = plan.length ? plan.map((d,i)=>{
     let ck = "";
@@ -2543,6 +2597,34 @@ function renderSpending(){
   '</div>';
   el.innerHTML = html;
 }
+/* Display on-hand stock in PURCHASE units, split into whole + sub-unit (v1.30).
+   - liquids (tracked fl oz, bought by gallon): "2 gal 64 fl oz"
+   - dry (tracked oz or lb, bought by pound): "5 lb 8 oz"
+   - salt: whole pounds only (added in 1-lb increments — never show ounces)
+   The stored qty stays exact; this is display only. Dosing uses the precise amount. */
+function fmtStock(it, k){
+  const tu = CONSUME_UNIT[k];              // tracking unit the qty is stored in
+  const q = Number(it.qty)||0;
+  // whole-pound-only products (salt): show rounded whole pounds
+  if(k==="salt"){
+    return '<b>'+Math.round(q)+'</b> <span class="muted small">lb</span>';
+  }
+  if(tu==="fl oz"){
+    // stored in fl oz, purchased by gallon → gal + fl oz
+    const gal = Math.floor(q/128), floz = Math.round(q - gal*128);
+    if(gal>0 && floz>0) return '<b>'+gal+'</b> <span class="muted small">gal</span> <b>'+floz+'</b> <span class="muted small">fl oz</span>';
+    if(gal>0) return '<b>'+gal+'</b> <span class="muted small">gal</span>';
+    return '<b>'+floz+'</b> <span class="muted small">fl oz</span>';
+  }
+  // dry products: express in lb + oz. qty may be stored in oz (soda ash, CYA) or lb (bicarb, calcium, shock).
+  let totalOz;
+  if(tu==="oz") totalOz = q;              // already ounces
+  else totalOz = q*16;                    // stored in lb → to oz
+  const lb = Math.floor(totalOz/16), oz = Math.round(totalOz - lb*16);
+  if(lb>0 && oz>0) return '<b>'+lb+'</b> <span class="muted small">lb</span> <b>'+oz+'</b> <span class="muted small">oz</span>';
+  if(lb>0) return '<b>'+lb+'</b> <span class="muted small">lb</span>';
+  return '<b>'+oz+'</b> <span class="muted small">oz</span>';
+}
 function renderInventory(){
   const el = $("dash-inventory"); if(!el) return;
   const items = INV_ORDER.filter(k=>S.shelf[k] && !S.shelf[k].hidden).map(k=>({k, it:S.shelf[k]}));
@@ -2555,7 +2637,6 @@ function renderInventory(){
         const trackOnly = isTrackingOnly(k);
         const low = !trackOnly && it.lowAt>0 && it.qty<=it.lowAt;  // no low-stock nag for tracking-only items
         const sub = [it.brand, it.store].filter(Boolean).join(" · ");
-        const buyEq = (it.buyUnit && it.buyQty>0) ? ' <span class="muted small">('+(Math.round(it.qty/it.buyQty*100)/100)+' '+esc(it.buyUnit)+')</span>' : '';
         const tag = low ? ' <span class="chip bad" style="font-size:11px">Low</span>'
                   : trackOnly ? ' <span class="chip" style="font-size:11px;background:var(--line)">Tracking only</span>' : '';
         const shortFlag = it.shortfall ? ' <span class="chip bad" style="font-size:11px">Count may be off</span>' : '';
@@ -2563,7 +2644,7 @@ function renderInventory(){
         return '<div class="invrow" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)">'+
           '<div style="flex:1;min-width:0">'+
             '<div style="font-weight:600">'+esc(it.label)+tag+shortFlag+'</div>'+
-            '<div style="font-family:\'IBM Plex Mono\',monospace"><b>'+(Math.round(it.qty*10)/10)+'</b> <span class="muted small">'+esc(u)+'</span>'+buyEq+'</div>'+
+            '<div style="font-family:\'IBM Plex Mono\',monospace">'+fmtStock(it,k)+'</div>'+
             (sub?'<div class="muted small">'+esc(sub)+'</div>':'')+
             shortNote+
           '</div>'+
@@ -2708,7 +2789,11 @@ function renderShelf(){
         '</div>'+
         (hasBulk? '<div class="hint" style="margin-top:6px">1 '+esc(it.buyUnit)+' = '+it.buyQty+' '+esc(u)+'.</div>' : '')+
       '</div>'+
-      '<div style="margin-top:8px"><label class="f">Low-stock alert ('+esc(u)+')</label><input type="number" data-shelf="'+k+'" data-fld="lowAt" value="'+(it.lowAt||0)+'" step="0.5" inputmode="decimal"></div>'+
+      '<div class="row2" style="margin-top:8px">'+
+        '<div><label class="f">Low-stock alert ('+esc(u)+')</label><input type="number" data-shelf="'+k+'" data-fld="lowAt" value="'+(it.lowAt||0)+'" step="0.5" inputmode="decimal"></div>'+
+        '<div><label class="f">Minimum dose ('+esc(u)+')</label><input type="number" data-shelf="'+k+'" data-fld="minInc" value="'+(it.minInc||0)+'" step="0.25" inputmode="decimal"></div>'+
+      '</div>'+
+      '<div class="muted small" style="margin-top:3px">Smallest amount worth adding. Doses round down to this; anything less shows "nothing to add."</div>'+
       '<label class="ck" style="margin-top:10px"><input type="checkbox" data-shelf-show="'+k+'"'+(it.hidden?"":" checked")+'> Show on Upkeep tab</label>'+
       '</div>';
   }).join("");
@@ -2726,7 +2811,7 @@ function renderShelf(){
   $("shelf-editor").querySelectorAll("input:not([data-shelf-show]):not([data-pkg])").forEach(inp=>{
     if(inp.disabled) return;
     inp.onchange = ()=>{ const it = S.shelf[inp.dataset.shelf], f = inp.dataset.fld;
-      it[f] = (f==="strength"||f==="lowAt")? Number(inp.value) : inp.value; save();
+      it[f] = (f==="strength"||f==="lowAt"||f==="minInc")? Number(inp.value) : inp.value; save();
       renderShelf(); renderInventory(); renderDash(); };
   });
 }
