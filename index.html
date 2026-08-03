@@ -381,8 +381,11 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.25.0";
+const APP_VERSION = "1.26.0";
 const RELEASE_NOTES = [
+  {v:"1.26.0", d:"Aug 3, 2026", items:[
+    "You can now show or hide any product on the Upkeep tab. In Settings \u2192 product shelf, each product has a \u201cShow on Upkeep tab\u201d switch. Handy for hiding a product your pool type doesn\u2019t use \u2014 like liquid chlorine on a salt pool (the cell makes it), or salt on a chlorine pool. Hiding only affects the Upkeep list; nothing is deleted and dosing is unaffected."
+  ]},
   {v:"1.25.0", d:"Aug 3, 2026", items:[
     "Reminder cards on Today now have a \u201cReschedule\u201d button right on the card \u2014 tap it to pick a new date without opening the full form. Handy when a shipment slips a day."
   ]},
@@ -599,6 +602,9 @@ function appConfirm(msg, onYes, yesLabel){
 function appForm(title, fields, onSave){
   const m = $("form-modal"); $("form-modal-title").textContent = title;
   $("form-modal-body").innerHTML = fields.map(f=>{
+    if(f.type==="note"){
+      return '<div class="warnbar warn" style="margin-bottom:10px">'+esc(f.label)+'</div>';
+    }
     if(f.type==="select"){
       return '<label class="f">'+esc(f.label)+'</label><select id="fm-'+f.key+'">'+
         f.options.map(o=>'<option value="'+esc(o.v)+'"'+(String(o.v)===String(f.value)?' selected':'')+'>'+esc(o.l)+'</option>').join("")+'</select>';
@@ -613,7 +619,7 @@ function appForm(title, fields, onSave){
   $("form-modal-cancel").onclick = ()=>{ m.style.display="none"; };
   $("form-modal-save").onclick = ()=>{
     const vals = {};
-    fields.forEach(f=>{ const el=$("fm-"+f.key); vals[f.key] = f.type==="number"? (el.value===""?null:Number(el.value)) : el.value; });
+    fields.forEach(f=>{ if(f.type==="note") return; const el=$("fm-"+f.key); vals[f.key] = f.type==="number"? (el.value===""?null:Number(el.value)) : el.value; });
     m.style.display="none"; onSave(vals);
   };
   m.style.display="flex";
@@ -2163,17 +2169,44 @@ function openAcidFollowup(taskId){
 }
 /* Apply a previously-skipped product (e.g. once stock arrives). Records actual amount,
    logs a standalone entry, decrements inventory, feeds usage, clears the task. */
+/* Which readings drive each product's dose. The FIRST is the primary driver being corrected;
+   the rest are needed for the LSI/pH-target math so the recomputed dose is accurate.
+   Used by the stale-data focused retest (v1.26). */
+const DOSE_DRIVERS = {
+  acid:   ["ph","ta","ch","cya","temp"],
+  phup:   ["ph","ta","ch","cya","temp"],
+  bicarb: ["ta","ph","cya","temp"],
+  calcium:["ch","ta","cya","temp"],
+  cya:    ["cya"],
+  salt:   ["salt"],
+  chlorine:["fc"],
+  shock:  ["fc"]
+};
+function taskSourceTs(t){ return t.srcTs || t.createdTs || t.dueTs; }
+function isStaleTask(t){ return (Date.now() - taskSourceTs(t)) > 24*3600*1000; }
 function openApplyProduct(taskId){
   const t = (S.tasks||[]).find(x=>x.id===taskId); if(!t) return;
   const it = S.shelf[t.chem]; const u = unitOf(it, t.chem);
   const suggested = doseQty(t.amount);
-  appForm("Apply "+(it?it.label:t.product), [
-    {key:"added", label:"What do you want to do?", type:"select",
-      options:[{v:"yes",l:"I added it — record it"},{v:"later",l:"Not yet — remind me another day"},{v:"no",l:"No longer needed — dismiss"}], value:"yes"},
-    {key:"amt", label:"Amount added ("+u+")", type:"number", step:"0.5", value:String(suggested||"")},
-    {key:"when", label:"New reminder date (if not yet)", type:"date", value:new Date(t.dueTs).toISOString().slice(0,10)}
-  ], (v)=>{
+  const stale = isStaleTask(t);
+  const actionOpts = [{v:"yes",l:"I added it — record it"}];
+  if(stale) actionOpts.push({v:"retest",l:"Retest now (recommended) — data is stale"});
+  actionOpts.push({v:"later",l:"Not yet — remind me another day"});
+  actionOpts.push({v:"no",l:"No longer needed — dismiss"});
+  const fields = [];
+  if(stale){
+    fields.push({key:"stalenote", type:"note",
+      label:"⚠ This was based on your test from "+fmtDate(taskSourceTs(t))+", more than a day ago. Pool chemistry drifts — retest before applying so you add the right amount, not a stale one."});
+  }
+  fields.push({key:"added", label:"What do you want to do?", type:"select", options:actionOpts, value: stale?"retest":"yes"});
+  fields.push({key:"amt", label:"Amount added ("+u+")", type:"number", step:"0.5", value:String(suggested||"")});
+  fields.push({key:"when", label:"New reminder date (if not yet)", type:"date", value:new Date(t.dueTs).toISOString().slice(0,10)});
+  appForm("Apply "+(it?it.label:t.product), fields, (v)=>{
     const now = Date.now();
+    if(v.added==="retest"){
+      startFocusedRetest(t);   // launches a focused retest → recomputes → apply the fresh dose
+      return;
+    }
     if(v.added==="yes"){
       const amt = Number(v.amt);
       if(!amt || amt<=0){ toast("Enter the amount you added."); return; }
@@ -2185,7 +2218,6 @@ function openApplyProduct(taskId){
       else toast("Logged — that closes the loop.");
       t.done = true;
     } else if(v.added==="later"){
-      // Reschedule the reminder (e.g. shipment delayed) — keep the task open with a new date.
       const newTs = v.when ? new Date(v.when+"T09:00:00").getTime() : (t.dueTs + 86400000);
       t.dueTs = newTs;
       toast("Reminder moved to "+fmtDate(newTs)+".");
@@ -2356,7 +2388,7 @@ function isTrackingOnly(k){
 }
 function renderInventory(){
   const el = $("dash-inventory"); if(!el) return;
-  const items = INV_ORDER.filter(k=>S.shelf[k]).map(k=>({k, it:S.shelf[k]}));
+  const items = INV_ORDER.filter(k=>S.shelf[k] && !S.shelf[k].hidden).map(k=>({k, it:S.shelf[k]}));
   el.innerHTML =
     '<div class="eyebrow">Supplies</div><h2>Inventory</h2>'+
     '<div class="muted small">On-hand amounts. <b>−/+ are corrections</b> (fixing a wrong count) — they don\'t log usage. Use <b>Restock</b> when you buy more, and <b>Log a product</b> when you apply some.</div>'+
@@ -2429,7 +2461,7 @@ function decrementInventory(chem, amountStr){
 }
 /* ---- Quick add: log a product APPLIED outside a test (e.g. shock). Logs + decrements + feeds usage. ---- */
 function openQuickAdd(){
-  const opts = INV_ORDER.filter(k=>S.shelf[k]).map(k=>({v:k, l:S.shelf[k].label+" ("+unitOf(S.shelf[k],k)+")"}));
+  const opts = INV_ORDER.filter(k=>S.shelf[k] && !S.shelf[k].hidden).map(k=>({v:k, l:S.shelf[k].label+" ("+unitOf(S.shelf[k],k)+")"}));
   appForm("Log a product added", [
     {key:"prod", label:"Product", type:"select", options:opts, value:opts[0].v},
     {key:"amt", label:"Amount added", type:"number", step:"0.5", value:""},
@@ -2498,9 +2530,14 @@ function renderShelf(){
         (hasBulk? '<div class="hint" style="margin-top:6px">1 '+esc(it.buyUnit)+' = '+it.buyQty+' '+esc(u)+'.</div>' : '')+
       '</div>'+
       '<div style="margin-top:8px"><label class="f">Low-stock alert ('+esc(u)+')</label><input type="number" data-shelf="'+k+'" data-fld="lowAt" value="'+(it.lowAt||0)+'" step="0.5" inputmode="decimal"></div>'+
+      '<label class="ck" style="margin-top:10px"><input type="checkbox" data-shelf-show="'+k+'"'+(it.hidden?"":" checked")+'> Show on Upkeep tab</label>'+
       '</div>';
   }).join("");
-  $("shelf-editor").querySelectorAll("input").forEach(inp=>{
+  $("shelf-editor").querySelectorAll("input[data-shelf-show]").forEach(cb=>{
+    cb.onchange = ()=>{ const it = S.shelf[cb.dataset.shelfShow];
+      it.hidden = !cb.checked; save(); renderInventory(); renderDash(); };
+  });
+  $("shelf-editor").querySelectorAll("input:not([data-shelf-show])").forEach(inp=>{
     if(inp.disabled) return;
     inp.onchange = ()=>{ const it = S.shelf[inp.dataset.shelf], f = inp.dataset.fld;
       it[f] = (f==="strength"||f==="lowAt"||f==="buyQty")? Number(inp.value) : inp.value; save();
