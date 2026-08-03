@@ -373,8 +373,12 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.16.0";
+const APP_VERSION = "1.17.0";
 const RELEASE_NOTES = [
+  {v:"1.17.0", d:"Aug 2, 2026", items:[
+    "New \u201cEdit doses\u201d button on any logged test: reopen the treatment plan to check off a product you added later, uncheck one marked in error, or adjust the amount to what you actually poured (in case it differed from the recommendation). Assumes the same day as the test.",
+    "Inventory and the usage chart update by the change only \u2014 checking a dose subtracts stock, unchecking adds it back, and editing an amount corrects the difference, so reopening never double-counts."
+  ]},
   {v:"1.16.0", d:"Aug 2, 2026", items:[
     "Cleaned up how product units work. The unit a product is dosed and tracked in (fl oz, oz, or lb) is now set by the app to match its dosing instructions — shown but not editable, so it can never drift.",
     "Restocking is simpler: set an optional \u201cbuy-in-bulk\u201d container (e.g. gallon = 128 fl oz, or pound), and Restock lets you add whole containers or type the exact amount. Defaults: acid & chlorine in gallons, dry chemicals in pounds."
@@ -1237,7 +1241,9 @@ function logTreatment(){
   const doses = (wiz.plan||[]).filter(d=>d.chem!=="note").map((d)=>{
     const idx = wiz.plan.indexOf(d);
     const ck = $("dose-ck-"+idx);
-    return {chem:d.chem, product:d.product, amount:d.amount, added: ck?ck.checked:true};
+    const added = ck?ck.checked:true;
+    // appliedQty = how much of this dose has been deducted from inventory so far (delta-safe for later edits)
+    return {chem:d.chem, product:d.product, amount:d.amount, added, appliedQty: added? doseQty(d.amount) : 0};
   });
   const entry = {ts:Date.now(), readings:wiz.r, lsi:wiz.lsi, doses, notes:($("wiz-notes")?$("wiz-notes").value:"")};
   entry.holds = holdReasons(wiz.r);
@@ -1456,6 +1462,7 @@ function renderLog(){
         (e.notes? '<br>Notes: '+esc(e.notes):'')+
         whyAdded + whyNot +
         '<div class="btnrow" style="margin-top:10px"><button class="btn sm quiet" onclick="editLogEntry('+e.ts+')">Edit readings</button>'+
+        '<button class="btn sm quiet" onclick="editDoses('+e.ts+')">Edit doses</button>'+
         '<button class="btn sm danger" onclick="deleteLogEntry('+e.ts+')">Delete</button></div></div></details>';
     }).join("");
   }
@@ -1583,6 +1590,53 @@ function editLogEntry(ts){
     e.holds = holdReasons(r);
     save(); renderLog(); renderDash(); toast("Entry updated — LSI recomputed.");
   });
+}
+/* Edit which products were actually added on a past test, and the exact amounts.
+   Same-day assumption (keeps the test's date). Inventory moves ONLY by the delta vs what was
+   already applied (dose.appliedQty), so reopening is idempotent and never double-counts. */
+function editDoses(ts){
+  const e = S.log.find(x=>x.ts===ts); if(!e) return;
+  const doses = (e.doses||[]).filter(d=>d.chem!=="note");
+  if(!doses.length){ toast("No products were recommended on this test."); return; }
+  const m = $("form-modal"); $("form-modal-title").textContent = "Edit what you added — "+fmtDate(ts);
+  $("form-modal-body").innerHTML =
+    '<div class="muted small" style="margin-bottom:8px">Check what you actually added and adjust the amount if it differed from the recommendation. Assumes the same day as the test.</div>'+
+    doses.map((d,i)=>{
+      const u = unitOf(S.shelf[d.chem], d.chem);
+      const qty = doseQty(d.amount);
+      return '<div style="padding:8px 0;border-bottom:1px solid var(--line)">'+
+        '<label class="ck" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="ed-ck-'+i+'"'+(d.added?" checked":"")+'> <b>'+esc(d.product)+'</b></label>'+
+        '<div style="display:flex;align-items:center;gap:8px;margin-top:6px">'+
+          '<span class="muted small">Amount added:</span>'+
+          '<input type="number" id="ed-amt-'+i+'" value="'+qty+'" step="0.5" inputmode="decimal" style="max-width:120px">'+
+          '<span class="muted small">'+esc(u)+'</span>'+
+        '</div>'+
+        '<div class="muted small" style="margin-top:3px">Recommended: '+esc(d.amount)+'</div>'+
+      '</div>';
+    }).join("");
+  $("form-modal-cancel").onclick = ()=>{ m.style.display="none"; };
+  $("form-modal-save").onclick = ()=>{
+    doses.forEach((d,i)=>{
+      const ck = $("ed-ck-"+i), amtEl = $("ed-amt-"+i);
+      const nowAdded = ck.checked;
+      const nowQty = amtEl.value===""? doseQty(d.amount) : Math.max(0, Number(amtEl.value));
+      const u = unitOf(S.shelf[d.chem], d.chem);
+      // target amount deducted from inventory after this edit
+      const newApplied = nowAdded ? nowQty : 0;
+      const oldApplied = d.appliedQty!=null ? d.appliedQty : (d.added? doseQty(d.amount):0);
+      const delta = newApplied - oldApplied;           // >0 = use more stock, <0 = give back
+      if(delta!==0 && S.shelf[d.chem]){
+        S.shelf[d.chem].qty = Math.max(0, Math.round((Number(S.shelf[d.chem].qty||0) - delta)*10)/10);
+      }
+      d.added = nowAdded;
+      d.amount = nowAdded ? (nowQty+" "+u) : d.amount;  // record actual amount when added
+      d.appliedQty = newApplied;
+    });
+    m.style.display="none";
+    save(); renderLog(); renderDash();
+    toast("Updated what you added — inventory adjusted.");
+  };
+  m.style.display="flex";
 }
 function deleteLogEntry(ts){
   appConfirm("Delete this log entry? This can't be undone.", ()=>{
