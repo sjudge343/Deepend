@@ -384,8 +384,12 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.28.0";
+const APP_VERSION = "1.29.0";
 const RELEASE_NOTES = [
+  {v:"1.29.0", d:"Aug 3, 2026", items:[
+    "Cleaner way to describe the package you buy. Instead of typing a container name and doing the math, you now pick three things: package type (Bag, Jug, Bottle\u2026), unit of measure (pounds, gallons\u2026), and the number. The app converts to its tracking unit for you \u2014 e.g. a 4-lb bag of soda ash becomes 64 oz automatically.",
+    "Restocking and cost both work by the package now: enter how many bags and the cost per bag, and the app does bags \u00d7 cost. Your on-hand quantities are untouched by this change."
+  ]},
   {v:"1.28.0", d:"Aug 3, 2026", items:[
     "Stale-data protection. If you go to apply a reminder whose test is more than a day old, the app now recommends a quick retest first \u2014 just the readings that affect that product. It recomputes the dose from your fresh numbers so you add the right amount, not one based on chemistry that may have drifted.",
     "The retest is recorded as a logged test, and the freshly-computed dose is applied and logged \u2014 all in one step. If the retest comes back in range, it tells you the product is no longer needed and adds nothing."
@@ -527,14 +531,14 @@ const RELEASE_NOTES = [
 ];
 /* ============ STATE ============ */
 const DEFAULT_SHELF = {
-  acid:    {label:"Muriatic acid", strength:31.45, unit:"floz", brand:"", store:"", qty:0, lowAt:0, buyUnit:"gallon", buyQty:128},
-  phup:    {label:"Soda ash (pH up)", strength:100, unit:"oz", brand:"", store:"", qty:0, lowAt:0, buyUnit:"pound", buyQty:16},
-  bicarb:  {label:"Sodium bicarbonate", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, buyUnit:"pound", buyQty:1},
-  calcium: {label:"Calcium hardness increaser", strength:77, unit:"lb", brand:"", store:"", qty:0, lowAt:0, buyUnit:"pound", buyQty:1},
-  cya:     {label:"Stabilizer (CYA)", strength:100, unit:"oz", brand:"", store:"", qty:0, lowAt:0, buyUnit:"pound", buyQty:16},
-  salt:    {label:"Pool salt", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, buyUnit:"pound", buyQty:1},
-  chlorine:{label:"Liquid chlorine", strength:12.5, unit:"floz", brand:"", store:"", qty:0, lowAt:0, buyUnit:"gallon", buyQty:128},
-  shock:   {label:"Pool shock", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, buyUnit:"pound", buyQty:1}
+  acid:    {label:"Muriatic acid", strength:31.45, unit:"floz", brand:"", store:"", qty:0, lowAt:0, pkgType:"Jug", pkgUnit:"gal", pkgNum:1, buyUnit:"1-gal jug", buyQty:128},
+  phup:    {label:"Soda ash (pH up)", strength:100, unit:"oz", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:4, buyUnit:"4-lb bag", buyQty:64},
+  bicarb:  {label:"Sodium bicarbonate", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:1, buyUnit:"1-lb bag", buyQty:1},
+  calcium: {label:"Calcium hardness increaser", strength:77, unit:"lb", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:1, buyUnit:"1-lb bag", buyQty:1},
+  cya:     {label:"Stabilizer (CYA)", strength:100, unit:"oz", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:4, buyUnit:"4-lb bag", buyQty:64},
+  salt:    {label:"Pool salt", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:40, buyUnit:"40-lb bag", buyQty:40},
+  chlorine:{label:"Liquid chlorine", strength:12.5, unit:"floz", brand:"", store:"", qty:0, lowAt:0, pkgType:"Jug", pkgUnit:"gal", pkgNum:1, buyUnit:"1-gal jug", buyQty:128},
+  shock:   {label:"Pool shock", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, pkgType:"Bag", pkgUnit:"lb", pkgNum:1, buyUnit:"1-lb bag", buyQty:1}
 };
 /* AUTHORITY: the consumption unit is owned by the app, fixed to match the unit the dosing
    engine writes for each product (see fmtFlOz/fmtLb + the plan.push amounts). NOT user-editable —
@@ -544,6 +548,44 @@ const UNIT_LABEL = {floz:"fl oz", oz:"oz", lb:"lb"};
 /* Consumption/display unit for a product: app-owned CONSUME_UNIT, else fall back to internal unit. */
 function unitOf(it, k){ return (k && CONSUME_UNIT[k]) || UNIT_LABEL[it&&it.unit] || (it&&it.unit) || ""; }
 const UNIT_OPTS = [{v:"floz",l:"fl oz"},{v:"oz",l:"oz (weight)"},{v:"lb",l:"lb"}];
+
+/* ---- Package model (v1.29): a purchase is a PACKAGE = type + unit-of-measure + number.
+   e.g. Bag / lb / 4  = "4-lb bag". The app converts the package's measure into the product's
+   internal tracking unit, so the user never does math. ---- */
+const PKG_TYPES = ["Bag","Jug","Bottle","Box","Bucket","Jar","Container"];
+/* Purchase units the user can pick, with how each converts to a tracking unit. */
+const PKG_UNITS = {
+  lb:  {label:"pounds", toFloz:null, toOz:16,  toLb:1},      // weight
+  oz:  {label:"ounces", toFloz:null, toOz:1,   toLb:1/16},   // weight
+  gal: {label:"gallons", toFloz:128, toOz:null, toLb:null},  // volume
+  floz:{label:"fluid ounces", toFloz:1, toOz:null, toLb:null}
+};
+/* Which purchase units make sense for a product, based on its tracking unit (dry=weight, liquid=volume). */
+function pkgUnitsFor(k){
+  const tu = CONSUME_UNIT[k];
+  if(tu==="fl oz") return ["gal","floz"];     // liquids
+  return ["lb","oz"];                          // dry (tracked in lb or oz by weight)
+}
+/* Convert a package measure (number in pkgUnit) into the product's tracking unit (buyQty). */
+function pkgToTracking(k, pkgUnit, pkgNum){
+  const tu = CONSUME_UNIT[k], n = Number(pkgNum)||0, def = PKG_UNITS[pkgUnit];
+  if(!def || n<=0) return 0;
+  if(tu==="fl oz") return def.toFloz!=null ? n*def.toFloz : 0;
+  if(tu==="oz")    return def.toOz!=null   ? n*def.toOz   : 0;
+  if(tu==="lb")    return def.toLb!=null   ? n*def.toLb   : 0;
+  return 0;
+}
+/* Derive the legacy buyUnit (readable label) + buyQty (in tracking units) from the structured package
+   fields, so restock/cost/inventory keep using buyUnit/buyQty unchanged. Called on save + on load. */
+function deriveBuyFields(it, k){
+  if(it.pkgType && it.pkgUnit && it.pkgNum>0){
+    const measure = it.pkgNum, uLabel = it.pkgUnit==="floz"?"fl oz":it.pkgUnit;
+    it.buyUnit = measure+"-"+uLabel+" "+it.pkgType.toLowerCase();   // e.g. "4-lb bag"
+    it.buyQty  = pkgToTracking(k, it.pkgUnit, it.pkgNum);           // e.g. 64 (oz)
+  } else {
+    it.buyUnit = ""; it.buyQty = 0;
+  }
+}
 const BLANK = {
   profile:{sanitizer:"salt", combined:"no", gallons:null, spaGallons:null, surface:"plaster",
     ground:"inground", kit:"k2006", avgDepth:5, areaSqFt:null, cellTarget:3200, fillCH:null,
@@ -571,6 +613,8 @@ function mergeShelf(saved){
   if(saved){ Object.keys(out).forEach(k=>{ if(saved[k]) out[k] = Object.assign(out[k], saved[k]); });
     // keep any custom keys the user might have added
     Object.keys(saved).forEach(k=>{ if(!out[k]) out[k] = saved[k]; }); }
+  // Derive buyUnit/buyQty from structured package fields where present (keeps restock/cost in sync).
+  Object.keys(out).forEach(k=>{ if(out[k] && out[k].pkgType && out[k].pkgUnit && out[k].pkgNum>0) deriveBuyFields(out[k], k); });
   return out;
 }
 function load(){
@@ -2650,11 +2694,17 @@ function renderShelf(){
       '</div>'+
       '<div class="muted small" style="margin-top:3px">The tracking unit is set by the app to match its dosing instructions — not editable.</div>'+
       '<div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--line)">'+
-        '<div class="small"><b>Buy-in-bulk shortcut</b> <span class="muted">(optional)</span></div>'+
-        '<div class="muted small">If you buy this in a fixed container, name it and give its size. You\'ll get a one-tap option when restocking.</div>'+
-        '<div class="row2" style="margin-top:6px">'+
-          '<div><label class="f">Container name</label><input type="text" data-shelf="'+k+'" data-fld="buyUnit" value="'+esc(it.buyUnit||"")+'" placeholder="e.g. gallon"></div>'+
-          '<div><label class="f">'+esc(u)+' per '+(it.buyUnit?esc(it.buyUnit):"container")+'</label><input type="number" data-shelf="'+k+'" data-fld="buyQty" value="'+(it.buyQty||0)+'" step="0.5" inputmode="decimal"></div>'+
+        '<div class="small"><b>Package you buy</b> <span class="muted">(optional)</span></div>'+
+        '<div class="muted small">Pick the package, its unit, and how much. You\'ll restock and price by the package — the app does the conversion.</div>'+
+        '<div class="row3" style="display:grid;grid-template-columns:1fr 1fr 68px;gap:8px;margin-top:6px">'+
+          '<div><label class="f">Package</label><select data-pkg="'+k+'" data-pfld="pkgType">'+
+            '<option value="">—</option>'+
+            PKG_TYPES.map(pt=>'<option value="'+pt+'"'+(it.pkgType===pt?" selected":"")+'>'+pt+'</option>').join("")+
+          '</select></div>'+
+          '<div><label class="f">Unit</label><select data-pkg="'+k+'" data-pfld="pkgUnit">'+
+            pkgUnitsFor(k).map(pu=>'<option value="'+pu+'"'+(it.pkgUnit===pu?" selected":"")+'>'+PKG_UNITS[pu].label+'</option>').join("")+
+          '</select></div>'+
+          '<div><label class="f">Number</label><input type="number" data-pkg="'+k+'" data-pfld="pkgNum" value="'+(it.pkgNum||"")+'" step="0.5" inputmode="decimal"></div>'+
         '</div>'+
         (hasBulk? '<div class="hint" style="margin-top:6px">1 '+esc(it.buyUnit)+' = '+it.buyQty+' '+esc(u)+'.</div>' : '')+
       '</div>'+
@@ -2666,10 +2716,17 @@ function renderShelf(){
     cb.onchange = ()=>{ const it = S.shelf[cb.dataset.shelfShow];
       it.hidden = !cb.checked; save(); renderInventory(); renderDash(); };
   });
-  $("shelf-editor").querySelectorAll("input:not([data-shelf-show])").forEach(inp=>{
+  // Package fields (type/unit/number): derive buyUnit+buyQty on change.
+  $("shelf-editor").querySelectorAll("[data-pkg]").forEach(inp=>{
+    inp.onchange = ()=>{ const it = S.shelf[inp.dataset.pkg], f = inp.dataset.pfld;
+      it[f] = (f==="pkgNum")? Number(inp.value) : inp.value;
+      deriveBuyFields(it, inp.dataset.pkg); save();
+      renderShelf(); renderInventory(); renderDash(); };
+  });
+  $("shelf-editor").querySelectorAll("input:not([data-shelf-show]):not([data-pkg])").forEach(inp=>{
     if(inp.disabled) return;
     inp.onchange = ()=>{ const it = S.shelf[inp.dataset.shelf], f = inp.dataset.fld;
-      it[f] = (f==="strength"||f==="lowAt"||f==="buyQty")? Number(inp.value) : inp.value; save();
+      it[f] = (f==="strength"||f==="lowAt")? Number(inp.value) : inp.value; save();
       renderShelf(); renderInventory(); renderDash(); };
   });
 }
