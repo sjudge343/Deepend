@@ -381,8 +381,12 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.23.0";
+const APP_VERSION = "1.24.0";
 const RELEASE_NOTES = [
+  {v:"1.24.0", d:"Aug 3, 2026", items:[
+    "You can now set an apply-reminder from \u201cEdit doses\u201d on any logged test \u2014 not just at the moment you finish a test. Reopen a past test, and for anything you skipped, tick \u201cRemind me to apply this\u201d and pick a date. It lands on Today.",
+    "Reminder dates are editable. If a shipment is delayed, open the reminder and choose \u201cNot yet \u2014 remind me another day\u201d to push it out, or change the date directly in Edit doses. Recording the application still closes it out."
+  ]},
   {v:"1.23.0", d:"Aug 3, 2026", items:[
     "The treatment plan now checks your inventory. If it recommends a product you don\u2019t have enough of, it tells you right there that you\u2019ll need to buy it \u2014 and instead of \u201cI added this,\u201d it sets up a reminder (defaulting to tomorrow) to apply it once it arrives.",
     "That reminder lands on your Today screen. Tap it to record the application \u2014 which logs it, updates inventory, and clears the task. If your count was just stale, you can still record it anytime from \u201cEdit doses\u201d on the logged test."
@@ -1385,19 +1389,8 @@ function logTreatment(){
   doses.forEach(d=>{ if(d.added) decrementInventory(d.chem, d.amount); });
   // Apply-reminder tasks for skipped products the user wants reminded about (e.g. waiting on stock).
   applyReminders.forEach(rem=>{
-    S.tasks.push({ id:"apply-"+entry.ts+"-"+rem.chem, type:"applyProduct", createdTs:entry.ts,
+    S.tasks.push({ id:"apply-"+entry.ts+"-"+rem.chem, type:"applyProduct", createdTs:entry.ts, srcTs:entry.ts,
       dueTs:rem.dueTs, done:false, chem:rem.chem, product:rem.product, amount:rem.amount });
-  });
-  // For any SKIPPED product where the user asked to be reminded, schedule an apply-reminder task.
-  (wiz.plan||[]).filter(d=>d.chem!=="note").forEach(d=>{
-    const idx = wiz.plan.indexOf(d);
-    const ck = $("dose-ck-"+idx), remCk = $("dose-rem-ck-"+idx);
-    if(ck && !ck.checked && remCk && remCk.checked){
-      const whenEl = $("dose-rem-when-"+idx);
-      const dueTs = whenEl && whenEl.value ? new Date(whenEl.value+"T09:00:00").getTime() : Date.now()+86400000;
-      S.tasks.push({ id:"apply-"+entry.ts+"-"+d.chem, type:"applyReminder", createdTs:entry.ts,
-        dueTs, done:false, chem:d.chem, product:d.product, amount:d.amount });
-    }
   });
   // If this plan DEFERRED the acid for a big CYA dose, schedule a follow-up to re-test pH + add acid.
   const deferred = (wiz.plan||[]).some(x=>x.product==="Hold the acid for now");
@@ -1750,20 +1743,32 @@ function editDoses(ts){
   const e = S.log.find(x=>x.ts===ts); if(!e) return;
   const doses = (e.doses||[]).filter(d=>d.chem!=="note");
   if(!doses.length){ toast("No products were recommended on this test."); return; }
+  // Find an existing (not-done) apply-reminder task for a given product on this test, if any.
+  const existingRem = (chem)=> (S.tasks||[]).find(t=>t.type==="applyProduct" && !t.done && t.srcTs===ts && t.chem===chem);
   const m = $("form-modal"); $("form-modal-title").textContent = "Edit what you added — "+fmtDate(ts);
   $("form-modal-body").innerHTML =
-    '<div class="muted small" style="margin-bottom:8px">Check what you actually added and adjust the amount if it differed from the recommendation. Assumes the same day as the test.</div>'+
+    '<div class="muted small" style="margin-bottom:8px">Check what you actually added and adjust the amount if it differed. For anything you skipped, you can set a reminder to apply it later. Assumes the same day as the test.</div>'+
     doses.map((d,i)=>{
       const u = unitOf(S.shelf[d.chem], d.chem);
       const qty = doseQty(d.amount);
+      const rem = existingRem(d.chem);
+      const remDate = rem ? new Date(rem.dueTs).toISOString().slice(0,10) : tomorrowISO();
+      const skipped = !d.added;
       return '<div style="padding:8px 0;border-bottom:1px solid var(--line)">'+
-        '<label class="ck" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="ed-ck-'+i+'"'+(d.added?" checked":"")+'> <b>'+esc(d.product)+'</b></label>'+
+        '<label class="ck" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="ed-ck-'+i+'"'+(d.added?" checked":"")+' onchange="edToggleRemind('+i+')"> <b>'+esc(d.product)+'</b></label>'+
         '<div style="display:flex;align-items:center;gap:8px;margin-top:6px">'+
           '<span class="muted small">Amount added:</span>'+
           '<input type="number" id="ed-amt-'+i+'" value="'+qty+'" step="0.5" inputmode="decimal" style="max-width:120px">'+
           '<span class="muted small">'+esc(u)+'</span>'+
         '</div>'+
         '<div class="muted small" style="margin-top:3px">Recommended: '+esc(d.amount)+'</div>'+
+        '<div id="ed-remind-'+i+'" style="display:'+(skipped?"block":"none")+';margin-top:8px;padding:8px 10px;background:var(--waterlite);border-radius:10px">'+
+          '<label class="ck" style="margin-top:0"><input type="checkbox" id="ed-rem-ck-'+i+'"'+(rem?" checked":"")+' onchange="edToggleRemindDate('+i+')"> Remind me to apply this</label>'+
+          '<div id="ed-rem-date-'+i+'" style="display:'+(rem?"block":"none")+';margin-top:6px">'+
+            '<label class="f">Remind me on</label>'+
+            '<input type="date" id="ed-rem-when-'+i+'" value="'+remDate+'">'+
+          '</div>'+
+        '</div>'+
       '</div>';
     }).join("");
   $("form-modal-cancel").onclick = ()=>{ m.style.display="none"; };
@@ -1787,13 +1792,33 @@ function editDoses(ts){
       d.added = nowAdded;
       d.amount = nowAdded ? (nowQty+" "+u) : d.amount;  // record actual amount when added
       d.appliedQty = newApplied;
+      // Reminder reconciliation for skipped products:
+      const rem = existingRem(d.chem);
+      const wantRem = !nowAdded && $("ed-rem-ck-"+i) && $("ed-rem-ck-"+i).checked;
+      const whenEl = $("ed-rem-when-"+i);
+      const whenTs = whenEl && whenEl.value ? new Date(whenEl.value+"T09:00:00").getTime() : (rem?rem.dueTs:new Date(tomorrowISO()+"T09:00:00").getTime());
+      if(nowAdded && rem){ rem.done = true; }              // applied now → clear any pending reminder
+      else if(wantRem && rem){ rem.dueTs = whenTs; }       // update the date (delayed shipment)
+      else if(wantRem && !rem){                            // create a new reminder from Edit doses
+        S.tasks.push({ id:"apply-"+ts+"-"+d.chem, type:"applyProduct", createdTs:ts, srcTs:ts,
+          dueTs:whenTs, done:false, chem:d.chem, product:d.product, amount:d.amount });
+      } else if(!wantRem && rem && !nowAdded){ rem.done = true; }  // user turned the reminder off
     });
     m.style.display="none";
-    save(); renderLog(); renderDash();
+    save(); renderLog(); renderDash(); if($("view-today")&&$("view-today").classList.contains("active")) renderToday();
     if(anyShort) toast("Updated — but an amount exceeded what was on hand. Inventory count may be off; correct it on the dashboard.");
-    else toast("Updated what you added — inventory adjusted.");
+    else toast("Updated.");
   };
   m.style.display="flex";
+}
+/* Edit-doses reminder toggles: show the reminder row only for skipped products. */
+function edToggleRemind(i){
+  const added = $("ed-ck-"+i).checked;
+  const row = $("ed-remind-"+i); if(row) row.style.display = added ? "none" : "block";
+}
+function edToggleRemindDate(i){
+  const on = $("ed-rem-ck-"+i).checked;
+  const d = $("ed-rem-date-"+i); if(d) d.style.display = on ? "block" : "none";
 }
 function deleteLogEntry(ts){
   appConfirm("Delete this log entry? This can't be undone.", ()=>{
@@ -2125,9 +2150,10 @@ function openApplyProduct(taskId){
   const it = S.shelf[t.chem]; const u = unitOf(it, t.chem);
   const suggested = doseQty(t.amount);
   appForm("Apply "+(it?it.label:t.product), [
-    {key:"added", label:"Did you add it?", type:"select",
-      options:[{v:"yes",l:"Yes — I added it"},{v:"no",l:"No longer needed — dismiss"}], value:"yes"},
-    {key:"amt", label:"Amount added ("+u+")", type:"number", step:"0.5", value:String(suggested||"")}
+    {key:"added", label:"What do you want to do?", type:"select",
+      options:[{v:"yes",l:"I added it — record it"},{v:"later",l:"Not yet — remind me another day"},{v:"no",l:"No longer needed — dismiss"}], value:"yes"},
+    {key:"amt", label:"Amount added ("+u+")", type:"number", step:"0.5", value:String(suggested||"")},
+    {key:"when", label:"New reminder date (if not yet)", type:"date", value:new Date(t.dueTs).toISOString().slice(0,10)}
   ], (v)=>{
     const now = Date.now();
     if(v.added==="yes"){
@@ -2139,10 +2165,16 @@ function openApplyProduct(taskId){
       const short = decrementInventory(t.chem, amountStr);
       if(short>0) toast("Logged. On-hand was short — correct the count on the dashboard.");
       else toast("Logged — that closes the loop.");
+      t.done = true;
+    } else if(v.added==="later"){
+      // Reschedule the reminder (e.g. shipment delayed) — keep the task open with a new date.
+      const newTs = v.when ? new Date(v.when+"T09:00:00").getTime() : (t.dueTs + 86400000);
+      t.dueTs = newTs;
+      toast("Reminder moved to "+fmtDate(newTs)+".");
     } else {
+      t.done = true;
       toast("Dismissed — no longer on your list.");
     }
-    t.done = true;
     S.log.sort((a,b)=>a.ts-b.ts);
     save(); renderAll(); if($("view-today").classList.contains("active")) renderToday();
   });
