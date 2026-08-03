@@ -167,8 +167,6 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
     <div class="btnrow"><button class="btn primary" onclick="startWizard()">Start a test session</button></div>
   </div>
   <div class="card" id="dash-projection"></div>
-  <div class="card" id="dash-inventory"></div>
-  <div class="card" id="dash-filters"></div>
 </section>
 
 <!-- TEST WIZARD -->
@@ -183,7 +181,7 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <!-- FILTERS -->
 <section class="view" id="view-filters">
   <div class="card">
-    <div class="eyebrow">Equipment</div>
+    <div class="eyebrow">Upkeep</div>
     <h2>Filters</h2>
     <div id="filter-list"></div>
     <div class="btnrow" id="add-filter-btnrow"><button class="btn ghost" onclick="toggleAddFilter(true)">+ Add filter</button></div>
@@ -206,6 +204,7 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
       <div class="btnrow"><button class="btn quiet" onclick="toggleAddFilter(false)">Cancel</button><button class="btn primary" onclick="addFilter()">Add filter</button></div>
     </div>
   </div>
+  <div class="card" id="dash-inventory"></div>
 </section>
 
 <!-- LOG -->
@@ -369,7 +368,7 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
   <button data-view="today" class="on"><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Today</button>
   <button data-view="dash"><svg viewBox="0 0 24 24"><path d="M3 12c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 17c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 7c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/></svg>Pool</button>
   <button data-view="test"><svg viewBox="0 0 24 24"><path d="M9 3h6M10 3v5l-4.5 8.5A3 3 0 0 0 8.2 21h7.6a3 3 0 0 0 2.7-4.5L14 8V3"/><path d="M7.5 15h9"/></svg>Test</button>
-  <button data-view="filters"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16M6 6.5c3 2 9 2 12 0M6 17.5c3-2 9-2 12 0"/></svg>Filters</button>
+  <button data-view="filters"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16M6 6.5c3 2 9 2 12 0M6 17.5c3-2 9-2 12 0"/></svg>Upkeep</button>
   <button data-view="log"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg>Log</button>
   <button data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.06-.4.1-.8.1-1.2Z"/></svg>Settings</button>
 </nav>
@@ -382,8 +381,12 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.21.0";
+const APP_VERSION = "1.22.0";
 const RELEASE_NOTES = [
+  {v:"1.22.0", d:"Aug 3, 2026", items:[
+    "Skip a recommended product (waiting on stock, no time)? When you leave \u201cI added this\u201d unchecked, you can now tap \u201cRemind me to apply this\u201d and pick a date (defaults to tomorrow).",
+    "The reminder lands in Today on that date: \u201cApply [product] — [amount].\u201d Tap it to record what you actually added — it logs, updates inventory, and clears the task. Everything you do stays recorded."
+  ]},
   {v:"1.21.0", d:"Aug 3, 2026", items:[
     "Simplified: everything that\u2019s due now lives in one place \u2014 the Today tab. Removed the duplicate reminder bar from the Pool tab, so Pool is a clean status view (your current balance and inventory) and Today is the single list of what to do and when."
   ]},
@@ -1229,6 +1232,17 @@ function equipNext(){
   wiz.equip.output = Number($("eq-output").value)||0;
   wiz.i++; renderWiz();
 }
+function tomorrowISO(){ const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); }
+/* When "I added this" is unchecked, reveal the optional "remind me to apply this" row. */
+function toggleDoseReminder(i){
+  const added = $("dose-ck-"+i).checked;
+  const row = $("dose-remind-"+i); if(row) row.style.display = added ? "none" : "block";
+  if(added){ const rc=$("dose-rem-ck-"+i); if(rc){ rc.checked=false; } const rd=$("dose-rem-date-"+i); if(rd) rd.style.display="none"; }
+}
+function toggleDoseReminderDate(i){
+  const on = $("dose-rem-ck-"+i).checked;
+  const d = $("dose-rem-date-"+i); if(d) d.style.display = on ? "block" : "none";
+}
 function renderReview(){
   const r = wiz.r, lsi = computeLSI(r), st = lsiStatus(lsi), plan = buildPlan(r);
   wiz.plan = plan; wiz.lsi = lsi;
@@ -1240,7 +1254,16 @@ function renderReview(){
       '<div class="small" style="margin-top:6px">'+esc(d.how)+'</div>'+
       (d.warn?('<div class="warnline">'+esc(d.warn)+'</div>'):"")+
       (d.wait?('<div class="wait">⏱ '+esc(d.wait)+'</div>'):"")+
-      (d.chem!=="note"?('<label class="ck"><input type="checkbox" id="dose-ck-'+i+'" checked> I added this</label>'):"")+
+      (d.chem!=="note"?(
+        '<label class="ck"><input type="checkbox" id="dose-ck-'+i+'" checked onchange="toggleDoseReminder('+i+')"> I added this</label>'+
+        '<div id="dose-remind-'+i+'" style="display:none;margin-top:6px;padding:8px 10px;background:var(--waterlite);border-radius:10px">'+
+          '<label class="ck" style="margin-top:0"><input type="checkbox" id="dose-rem-ck-'+i+'" onchange="toggleDoseReminderDate('+i+')"> Remind me to apply this</label>'+
+          '<div id="dose-rem-date-'+i+'" style="display:none;margin-top:6px">'+
+            '<label class="f">Remind me on</label>'+
+            '<input type="date" id="dose-rem-when-'+i+'" value="'+tomorrowISO()+'">'+
+          '</div>'+
+        '</div>'
+      ):"")+
     '</div>').join("")
     : '<div class="hint"><b>Nothing to add.</b> Water is in range — log the test and enjoy the pool.</div>';
   const ca = carbAlk(r.ta, r.cya);
@@ -1305,10 +1328,20 @@ function cancelWizard(){
   }, "Discard");
 }
 function logTreatment(){
+  const applyReminders = [];
   const doses = (wiz.plan||[]).filter(d=>d.chem!=="note").map((d)=>{
     const idx = wiz.plan.indexOf(d);
     const ck = $("dose-ck-"+idx);
     const added = ck?ck.checked:true;
+    // If skipped AND the user asked to be reminded, capture it for a Today task.
+    if(!added){
+      const remCk = $("dose-rem-ck-"+idx);
+      if(remCk && remCk.checked){
+        const whenEl = $("dose-rem-when-"+idx);
+        const whenStr = whenEl && whenEl.value ? whenEl.value : tomorrowISO();
+        applyReminders.push({chem:d.chem, product:d.product, amount:d.amount, dueTs:new Date(whenStr+"T09:00:00").getTime()});
+      }
+    }
     // appliedQty = how much of this dose has been deducted from inventory so far (delta-safe for later edits)
     return {chem:d.chem, product:d.product, amount:d.amount, added, appliedQty: added? doseQty(d.amount) : 0};
   });
@@ -1322,6 +1355,22 @@ function logTreatment(){
   S.log.push(entry);
   // auto-decrement inventory for everything actually added
   doses.forEach(d=>{ if(d.added) decrementInventory(d.chem, d.amount); });
+  // Apply-reminder tasks for skipped products the user wants reminded about (e.g. waiting on stock).
+  applyReminders.forEach(rem=>{
+    S.tasks.push({ id:"apply-"+entry.ts+"-"+rem.chem, type:"applyProduct", createdTs:entry.ts,
+      dueTs:rem.dueTs, done:false, chem:rem.chem, product:rem.product, amount:rem.amount });
+  });
+  // For any SKIPPED product where the user asked to be reminded, schedule an apply-reminder task.
+  (wiz.plan||[]).filter(d=>d.chem!=="note").forEach(d=>{
+    const idx = wiz.plan.indexOf(d);
+    const ck = $("dose-ck-"+idx), remCk = $("dose-rem-ck-"+idx);
+    if(ck && !ck.checked && remCk && remCk.checked){
+      const whenEl = $("dose-rem-when-"+idx);
+      const dueTs = whenEl && whenEl.value ? new Date(whenEl.value+"T09:00:00").getTime() : Date.now()+86400000;
+      S.tasks.push({ id:"apply-"+entry.ts+"-"+d.chem, type:"applyReminder", createdTs:entry.ts,
+        dueTs, done:false, chem:d.chem, product:d.product, amount:d.amount });
+    }
+  });
   // If this plan DEFERRED the acid for a big CYA dose, schedule a follow-up to re-test pH + add acid.
   const deferred = (wiz.plan||[]).some(x=>x.product==="Hold the acid for now");
   const addedCya = doses.some(d=>d.chem==="cya" && d.added);
@@ -1478,7 +1527,7 @@ function editFilter(id){
 }
 function renderFilters(){
   const el = $("filter-list");
-  if(!S.filters.length){ el.innerHTML = '<div class="emptymsg">No filters yet. Add your cartridge, sand, or DE filter below and the app will nag you at the right time.</div>'; return; }
+  if(!S.filters.length){ el.innerHTML = '<div class="emptymsg">No filters yet. Add your cartridge, sand, or DE filter below and the app will nag you at the right time.</div>'; renderInventory(); return; }
   el.innerHTML = S.filters.map(f=>{
     const st = filterStatus(f).map(s=>'<span class="chip '+s.cls+'">'+s.txt+'</span>').join(" ");
     const typeName = {cartridge:"Cartridge", sand:"Sand", de:"DE"}[f.type]||f.type;
@@ -1490,6 +1539,7 @@ function renderFilters(){
       '<button class="btn sm ghost" onclick="markFilter('+f.id+',\'replace\')">Replaced</button>'+
       '<button class="btn sm danger" onclick="removeFilter('+f.id+')">Remove</button></div></div>';
   }).join("");
+  renderInventory();
 }
 
 /* ============ LOG + CHARTS ============ */
@@ -1923,6 +1973,17 @@ function computeTasks(){
         action:{kind:"acidFollowup", taskId:t.id}
       });
     }
+    // Apply-a-skipped-product reminders (e.g. waiting on stock)
+    if(t.type==="applyProduct" && !t.done){
+      const overdue = now >= t.dueTs;
+      tasks.push({
+        id:t.id, prio: overdue?1:5, dueTs:t.dueTs,
+        cls: overdue?"bad":"warn",
+        title: (overdue?"Apply ":"Apply soon: ")+esc(t.product)+" — "+esc(t.amount),
+        detail: "Recommended on "+fmtDate(t.createdTs)+" but skipped"+(overdue?" (was due "+fmtDate(t.dueTs)+")":", due "+fmtDate(t.dueTs))+". Add it when you have it, then record what you added.",
+        action:{kind:"applyProduct", taskId:t.id}
+      });
+    }
   });
   // 2. Test due — twice a week cadence
   if(last){
@@ -1969,10 +2030,11 @@ function runTaskAction(act){
   else if(act.kind==="goFilters") showView("filters");
   else if(act.kind==="goSettings") showView("settings");
   else if(act.kind==="acidFollowup") openAcidFollowup(act.taskId);
+  else if(act.kind==="applyProduct") openApplyProduct(act.taskId);
 }
 let TODAY_ACTIONS = [];
 function taskCta(kind){
-  return kind==="startTest"?"Start test":kind==="acidFollowup"?"Re-test & log":kind==="goFilters"?"Go to filters":kind==="goSettings"?"Open settings":"Do it";
+  return kind==="startTest"?"Start test":kind==="acidFollowup"?"Re-test & log":kind==="applyProduct"?"Apply & log":kind==="goFilters"?"Go to filters":kind==="goSettings"?"Open settings":"Do it";
 }
 function renderToday(){
   const el = $("today-list"); if(!el) return;
@@ -2028,6 +2090,35 @@ function openAcidFollowup(taskId){
     save(); renderAll(); if($("view-today").classList.contains("active")) renderToday();
   });
 }
+/* Apply a previously-skipped product (e.g. once stock arrives). Records actual amount,
+   logs a standalone entry, decrements inventory, feeds usage, clears the task. */
+function openApplyProduct(taskId){
+  const t = (S.tasks||[]).find(x=>x.id===taskId); if(!t) return;
+  const it = S.shelf[t.chem]; const u = unitOf(it, t.chem);
+  const suggested = doseQty(t.amount);
+  appForm("Apply "+(it?it.label:t.product), [
+    {key:"added", label:"Did you add it?", type:"select",
+      options:[{v:"yes",l:"Yes — I added it"},{v:"no",l:"No longer needed — dismiss"}], value:"yes"},
+    {key:"amt", label:"Amount added ("+u+")", type:"number", step:"0.5", value:String(suggested||"")}
+  ], (v)=>{
+    const now = Date.now();
+    if(v.added==="yes"){
+      const amt = Number(v.amt);
+      if(!amt || amt<=0){ toast("Enter the amount you added."); return; }
+      const amountStr = amt+" "+u;
+      S.log.push({ts:now, standalone:true, readings:{}, doses:[{chem:t.chem, product:(it?it.label:t.product), amount:amountStr, added:true, appliedQty:amt}],
+        notes:"Applied "+(it?it.label:t.product)+" (was recommended "+fmtDate(t.createdTs)+", added once available)."});
+      const short = decrementInventory(t.chem, amountStr);
+      if(short>0) toast("Logged. On-hand was short — correct the count on the dashboard.");
+      else toast("Logged — that closes the loop.");
+    } else {
+      toast("Dismissed — no longer on your list.");
+    }
+    t.done = true;
+    S.log.sort((a,b)=>a.ts-b.ts);
+    save(); renderAll(); if($("view-today").classList.contains("active")) renderToday();
+  });
+}
 function renderDash(){
   const last = lastEntry();
   if(last){
@@ -2052,14 +2143,7 @@ function renderDash(){
   }
   // Season-end preset nudge (once per season/year)
   maybeSeasonNudge();
-  const df = $("dash-filters");
-  df.innerHTML = '<div class="eyebrow">Equipment</div><h2>Filters</h2>'+
-    (S.filters.length ? S.filters.map(f=>{
-      const st = filterStatus(f).map(s=>'<span class="chip '+s.cls+'">'+s.txt+'</span>').join(" ");
-      return '<div class="fitem"><div class="nm">'+esc(f.name)+'</div><div>'+st+'</div></div>'; }).join("")
-    : '<div class="muted small">Add your filters in the Filters tab to get cleaning and replacement warnings here.</div>');
   renderProjection();
-  renderInventory();
 }
 
 /* Offer to update a season's preset once, at season end, if data showed a persistent lean. */
