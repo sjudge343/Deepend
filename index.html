@@ -203,6 +203,14 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <section class="view" id="view-log">
   <div class="card">
     <div class="eyebrow">History</div>
+    <h2>Product usage</h2>
+    <div class="muted small">Total added per calendar week (Sun–Sat), from doses you checked off. Tap a product to switch.</div>
+    <div class="seg" id="usage-product" style="margin-top:10px;flex-wrap:wrap"></div>
+    <div id="usage-summary" class="muted small" style="margin-top:10px"></div>
+    <canvas class="spark" id="usage-chart" style="height:150px;margin-top:6px"></canvas>
+  </div>
+  <div class="card">
+    <div class="eyebrow">History</div>
     <h2>Trends</h2>
     <div id="trend-wrap">
       <h3>LSI</h3><canvas class="spark" id="spark-lsi"></canvas>
@@ -355,8 +363,12 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.11.0";
+const APP_VERSION = "1.12.0";
 const RELEASE_NOTES = [
+  {v:"1.12.0", d:"Aug 2, 2026", items:[
+    "Acid from your demand drops is now a real, checkbox-tracked step in the treatment sequence (\u201cI added this\u201d) \u2014 it replaces the app\u2019s pH-estimate acid so your titration is the logged number. Every product you add is now captured for history.",
+    "New Product Usage chart on the Log tab: weekly totals (Sun\u2013Sat) per product with a tap-to-switch selector, plus this-week and 4-week-average figures. See how much acid, stabilizer, etc. you go through week over week."
+  ]},
   {v:"1.11.0", d:"Aug 2, 2026", items:[
     "Added \u201cCancel without saving\u201d on the results screen to discard a test session before logging it (with a confirm).",
     "The first test step now shows Cancel instead of a dead end, so you can always back out of the wizard."
@@ -753,10 +765,18 @@ function buildPlan(r){
   }
 
   /* 2. pH — steered by the LSI equation, not a fixed number.
-     When pH was off-scale, the acid-demand drops (shown separately) are the governing dose,
-     so skip the pH-estimate acid step to avoid a redundant second number. */
-  if(r.phOffScale && r.acidDrops>0){
-    /* drops drive the acid dose; no pH-estimate step */
+     When acid-demand drops are present, they are the AUTHORITATIVE acid dose:
+     add them as a real, checkbox-logged step and skip any pH-estimate acid step. */
+  if(r.acidDrops>0 && !acidForTA){
+    const fl = acidFromDrops(r.acidDrops);
+    plan.push({chem:"acid", product:sh.acid.label+" ("+acidStr+"%)",
+      amount:Math.round(fl)+" fl oz", raw:-1,
+      why:"From "+r.acidDrops+" drop"+(r.acidDrops===1?"":"s")+" of R-0005 acid demand"+
+        (r.phOffScale?" · pH was off-scale (>8.0), titrated to "+fmt1(r.resultPh):""),
+      how:"Pour slowly into the deep end with the pump running. Never mix with chlorine.",
+      wait:"Retest after 30 min of circulation."});
+  } else if(r.phOffScale && r.acidDrops>0){
+    /* handled above */
   } else if(ph > phT + 0.1 && !acidForTA){
     const d = ph - phT;
     plan.push({chem:"acid", product:sh.acid.label+" ("+acidStr+"%)",
@@ -1111,20 +1131,6 @@ function renderReview(){
   const ca = carbAlk(r.ta, r.cya);
   const offScale = !!r.phOffScale;
 
-  /* acid-demand comparison block */
-  let acidBlock = "";
-  if(r.acidDrops>0){
-    const flDrops = acidFromDrops(r.acidDrops);
-    const acidEst = plan.find(d=>d.chem==="acid");
-    acidBlock = '<div class="dose" style="border-color:var(--water)">'+
-      '<span class="chip info">Acid demand · primary</span>'+
-      '<div class="amt" style="margin-top:6px">'+Math.round(flDrops)+' fl oz</div>'+
-      '<div class="why">From '+r.acidDrops+' drop'+(r.acidDrops===1?"":"s")+' of R-0005 in '+esc(S.shelf.acid.label)+' ('+(Number(S.shelf.acid.strength)||31.45)+'%)'+
-        (offScale? ' · pH was off-scale (>8.0), titrated to '+fmt1(r.resultPh)+'':'')+'</div>'+
-      (acidEst && !offScale? '<div class="small muted" style="margin-top:6px">pH-based estimate for comparison: '+esc(acidEst.amount)+'</div>':'')+
-      '</div>';
-  }
-
   /* chlorine advice block */
   let clBlock = "";
   if(S.profile.sanitizer==="salt" && wiz.equip){
@@ -1172,7 +1178,7 @@ function renderReview(){
     (S.profile.sanitizer==="salt"?' · est. TDS '+estTDS(r)+' ppm':'')+'</div>'+
     '<h3>Treatment sequence</h3>'+
     '<div class="muted small">Follow the numbered order. Add one product at a time — never mix acid and chlorine, and keep the pump running throughout.</div>'+
-    acidBlock + doses + clBlock + holdBlock +
+    doses + clBlock + holdBlock +
     '<label class="f">Notes (optional)</label><textarea id="wiz-notes" rows="2"></textarea>'+
     '<div class="btnrow"><button class="btn quiet" onclick="wizBack()">Back</button>'+
     '<button class="btn primary" onclick="logTreatment()">Log this session</button></div>'+
@@ -1402,6 +1408,99 @@ function renderLog(){
   drawSpark("spark-ph", S.log.map(e=>Number(e.readings.ph)), {lo:7.4, hi:7.6});
   drawSpark("spark-third", S.log.map(e=> salt? Number(e.readings.salt||0) : Number(e.readings.ch||0)),
     salt? {lo:targets().salt.lo, hi:targets().salt.hi} : {lo:targets().ch.lo, hi:targets().ch.hi});
+  renderUsage();
+}
+
+/* ---- Product usage: weekly totals per product from checked doses ---- */
+const USAGE_PRODUCTS = [
+  {chem:"acid",    label:"Acid",       unit:"fl oz"},
+  {chem:"cya",     label:"Stabilizer", unit:"oz"},
+  {chem:"calcium", label:"Calcium",    unit:"lb"},
+  {chem:"bicarb",  label:"Bicarb",     unit:"lb"},
+  {chem:"phup",    label:"pH Up",      unit:"oz"},
+  {chem:"salt",    label:"Salt",       unit:"lb"}
+];
+let usageSel = "acid";
+/* Pull a numeric quantity out of a dose amount string, converting lb→oz-of-weight consistently.
+   We keep each product in its own native unit (acid fl oz; dry chems as shown). */
+function doseQty(amount){
+  if(!amount) return 0;
+  const s = String(amount);
+  // "3 lb 8 oz" → 3.5 lb  |  "20 fl oz" → 20  |  "43 oz by weight" → 43  |  "1.5 qt (52 fl oz)" → 52
+  const flozParen = s.match(/\((\d+(?:\.\d+)?)\s*fl\s*oz\)/i); if(flozParen) return parseFloat(flozParen[1]);
+  const floz = s.match(/(\d+(?:\.\d+)?)\s*fl\s*oz/i); if(floz) return parseFloat(floz[1]);
+  const lbOz = s.match(/(\d+(?:\.\d+)?)\s*lb(?:\s+(\d+(?:\.\d+)?)\s*oz)?/i);
+  if(lbOz){ return parseFloat(lbOz[1]) + (lbOz[2]?parseFloat(lbOz[2])/16:0); }
+  const oz = s.match(/(\d+(?:\.\d+)?)\s*oz/i); if(oz) return parseFloat(oz[1]);
+  const n = s.match(/(\d+(?:\.\d+)?)/); return n? parseFloat(n[1]) : 0;
+}
+function weekStart(ts){ // Sunday 00:00 of that week, local
+  const d = new Date(ts); d.setHours(0,0,0,0); d.setDate(d.getDate()-d.getDay()); return d.getTime();
+}
+function weeklyUsage(chem){
+  const weeks = {}; // weekStartTs -> total qty
+  S.log.forEach(e=>{
+    (e.doses||[]).forEach(dz=>{
+      if(dz.added && dz.chem===chem){
+        const ws = weekStart(e.ts);
+        weeks[ws] = (weeks[ws]||0) + doseQty(dz.amount);
+      }
+    });
+  });
+  return weeks;
+}
+function renderUsage(){
+  const seg = $("usage-product"); if(!seg) return;
+  // only show products that appear in the log, plus always keep the selected one visible
+  const present = new Set();
+  S.log.forEach(e=>(e.doses||[]).forEach(d=>{ if(d.added) present.add(d.chem); }));
+  const shown = USAGE_PRODUCTS.filter(p=>present.has(p.chem));
+  if(!shown.length){
+    seg.innerHTML=""; $("usage-summary").textContent="";
+    const c=$("usage-chart"); if(c){ const x=c.getContext("2d"); x&&x.clearRect(0,0,c.width,c.height); }
+    $("usage-summary").innerHTML='<div class="emptymsg">No products logged yet. Once you check off doses in a test session, your weekly usage shows here.</div>';
+    return;
+  }
+  if(!shown.find(p=>p.chem===usageSel)) usageSel = shown[0].chem;
+  seg.innerHTML = shown.map(p=>'<button data-c="'+p.chem+'"'+(p.chem===usageSel?' class="on"':'')+'>'+p.label+'</button>').join("");
+  seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{ usageSel=b.dataset.c; renderUsage(); });
+
+  const prod = USAGE_PRODUCTS.find(p=>p.chem===usageSel);
+  const weeks = weeklyUsage(usageSel);
+  // build last 8 calendar weeks (including empty ones) up to current week
+  const nowWs = weekStart(Date.now());
+  const labels=[], vals=[];
+  for(let i=7;i>=0;i--){
+    const ws = nowWs - i*7*86400000;
+    labels.push(new Date(ws).toLocaleDateString(undefined,{month:"numeric",day:"numeric"}));
+    vals.push(Math.round((weeks[ws]||0)*10)/10);
+  }
+  // summary: this week + 4-week avg
+  const thisWk = vals[vals.length-1];
+  const last4 = vals.slice(-4); const avg4 = last4.reduce((a,b)=>a+b,0)/4;
+  $("usage-summary").innerHTML =
+    '<b>This week:</b> '+thisWk+' '+prod.unit+' · <b>4-week avg:</b> '+(Math.round(avg4*10)/10)+' '+prod.unit+'/wk';
+  drawBars("usage-chart", vals, labels, prod.unit);
+}
+function drawBars(id, vals, labels, unit){
+  const c = $(id); if(!c) return;
+  const dpr = window.devicePixelRatio||1, W = c.clientWidth||300, H = 150;
+  c.width = W*dpr; c.height = H*dpr;
+  const x = c.getContext("2d"); x.scale(dpr,dpr); x.clearRect(0,0,W,H);
+  const max = Math.max(1, ...vals);
+  const n = vals.length, gap = 6, bw = (W-16-gap*(n-1))/n, base = H-22;
+  vals.forEach((v,i)=>{
+    const bx = 8 + i*(bw+gap), bh = v/max*(base-14), by = base-bh;
+    x.fillStyle = i===n-1 ? "#177E96" : "#9DC3CD";
+    x.beginPath();
+    if(x.roundRect) x.roundRect(bx, by, bw, bh, 4); else x.rect(bx, by, bw, bh);
+    x.fill();
+    if(v>0){ x.fillStyle="#0C4A50"; x.font="10px IBM Plex Mono"; x.textAlign="center";
+      x.fillText(v, bx+bw/2, by-3); }
+    x.fillStyle="#5D7377"; x.font="9px IBM Plex Mono"; x.textAlign="center";
+    x.fillText(labels[i], bx+bw/2, H-6);
+  });
+  x.textAlign="left";
 }
 function editLogEntry(ts){
   const e = S.log.find(x=>x.ts===ts); if(!e) return;
