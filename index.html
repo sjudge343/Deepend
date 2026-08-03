@@ -373,8 +373,12 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:14px 0}
 <div id="toast" class="toast"></div>
 <script>
 /* ============ VERSION ============ */
-const APP_VERSION = "1.15.0";
+const APP_VERSION = "1.16.0";
 const RELEASE_NOTES = [
+  {v:"1.16.0", d:"Aug 2, 2026", items:[
+    "Cleaned up how product units work. The unit a product is dosed and tracked in (fl oz, oz, or lb) is now set by the app to match its dosing instructions — shown but not editable, so it can never drift.",
+    "Restocking is simpler: set an optional \u201cbuy-in-bulk\u201d container (e.g. gallon = 128 fl oz, or pound), and Restock lets you add whole containers or type the exact amount. Defaults: acid & chlorine in gallons, dry chemicals in pounds."
+  ]},
   {v:"1.15.0", d:"Aug 2, 2026", items:[
     "Each product in the shelf editor now shows what it Treats (pH, alkalinity, calcium, etc.), so the link between a product and its job is visible instead of hidden.",
     "Products outside the automated plan are marked \u201cTracking only.\u201d On a salt pool, liquid chlorine is tracking-only (your cell makes chlorine) and won\u2019t trigger low-stock warnings; pool shock is always tracking-only (added as needed)."
@@ -464,18 +468,22 @@ const RELEASE_NOTES = [
 ];
 /* ============ STATE ============ */
 const DEFAULT_SHELF = {
-  acid:    {label:"Muriatic acid", strength:31.45, unit:"floz", brand:"", store:"", qty:0, lowAt:0, unitLabel:"fl oz", buyUnit:"gallon", buyQty:128},
-  phup:    {label:"Soda ash (pH up)", strength:100, unit:"oz", brand:"", store:"", qty:0, lowAt:0, unitLabel:"oz", buyUnit:"", buyQty:0},
-  bicarb:  {label:"Sodium bicarbonate", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, unitLabel:"lb", buyUnit:"", buyQty:0},
-  calcium: {label:"Calcium hardness increaser", strength:77, unit:"lb", brand:"", store:"", qty:0, lowAt:0, unitLabel:"lb", buyUnit:"", buyQty:0},
-  cya:     {label:"Stabilizer (CYA)", strength:100, unit:"oz", brand:"", store:"", qty:0, lowAt:0, unitLabel:"oz", buyUnit:"", buyQty:0},
-  salt:    {label:"Pool salt", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, unitLabel:"lb", buyUnit:"40-lb bag", buyQty:40},
-  chlorine:{label:"Liquid chlorine", strength:12.5, unit:"floz", brand:"", store:"", qty:0, lowAt:0, unitLabel:"fl oz", buyUnit:"gallon", buyQty:128},
-  shock:   {label:"Pool shock", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, unitLabel:"lb", buyUnit:"1-lb bag", buyQty:1}
+  acid:    {label:"Muriatic acid", strength:31.45, unit:"floz", brand:"", store:"", qty:0, lowAt:0, buyUnit:"gallon", buyQty:128},
+  phup:    {label:"Soda ash (pH up)", strength:100, unit:"oz", brand:"", store:"", qty:0, lowAt:0, buyUnit:"pound", buyQty:16},
+  bicarb:  {label:"Sodium bicarbonate", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, buyUnit:"pound", buyQty:1},
+  calcium: {label:"Calcium hardness increaser", strength:77, unit:"lb", brand:"", store:"", qty:0, lowAt:0, buyUnit:"pound", buyQty:1},
+  cya:     {label:"Stabilizer (CYA)", strength:100, unit:"oz", brand:"", store:"", qty:0, lowAt:0, buyUnit:"pound", buyQty:16},
+  salt:    {label:"Pool salt", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, buyUnit:"pound", buyQty:1},
+  chlorine:{label:"Liquid chlorine", strength:12.5, unit:"floz", brand:"", store:"", qty:0, lowAt:0, buyUnit:"gallon", buyQty:128},
+  shock:   {label:"Pool shock", strength:100, unit:"lb", brand:"", store:"", qty:0, lowAt:0, buyUnit:"pound", buyQty:1}
 };
+/* AUTHORITY: the consumption unit is owned by the app, fixed to match the unit the dosing
+   engine writes for each product (see fmtFlOz/fmtLb + the plan.push amounts). NOT user-editable —
+   this is what decrementInventory and the usage chart parse, so it can never drift from instructions. */
+const CONSUME_UNIT = {acid:"fl oz", chlorine:"fl oz", phup:"oz", cya:"oz", bicarb:"lb", calcium:"lb", salt:"lb", shock:"lb"};
 const UNIT_LABEL = {floz:"fl oz", oz:"oz", lb:"lb"};
-/* Display/consumption unit for a product: user's custom unitLabel, else the internal unit's default. */
-function unitOf(it){ return (it && it.unitLabel && it.unitLabel.trim()) || UNIT_LABEL[it&&it.unit] || (it&&it.unit) || ""; }
+/* Consumption/display unit for a product: app-owned CONSUME_UNIT, else fall back to internal unit. */
+function unitOf(it, k){ return (k && CONSUME_UNIT[k]) || UNIT_LABEL[it&&it.unit] || (it&&it.unit) || ""; }
 const UNIT_OPTS = [{v:"floz",l:"fl oz"},{v:"oz",l:"oz (weight)"},{v:"lb",l:"lb"}];
 const BLANK = {
   profile:{sanitizer:"salt", combined:"no", gallons:null, spaGallons:null, surface:"plaster",
@@ -1954,7 +1962,7 @@ function renderInventory(){
     '<div class="muted small">On-hand amounts. <b>−/+ are corrections</b> (fixing a wrong count) — they don\'t log usage. Use <b>Restock</b> when you buy more, and <b>Log a product</b> when you apply some.</div>'+
     '<div id="inv-list" style="margin-top:10px">'+
       items.map(({k,it})=>{
-        const u = unitOf(it);
+        const u = unitOf(it,k);
         const trackOnly = isTrackingOnly(k);
         const low = !trackOnly && it.lowAt>0 && it.qty<=it.lowAt;  // no low-stock nag for tracking-only items
         const sub = [it.brand, it.store].filter(Boolean).join(" · ");
@@ -1985,7 +1993,7 @@ function adjustQty(k, dir){
 /* Restock: add stock in the PURCHASE unit (converts to consumption units). Not usage — just adds on-hand. */
 function openRestock(k){
   const it = S.shelf[k]; if(!it) return;
-  const cu = unitOf(it);
+  const cu = unitOf(it,k);
   const opts = [];
   if(it.buyUnit && it.buyQty>0) opts.push({v:"buy", l:it.buyUnit+" ("+it.buyQty+" "+cu+" each)"});
   opts.push({v:"cons", l:cu+" (single units)"});
@@ -2009,7 +2017,7 @@ function decrementInventory(chem, amountStr){
 }
 /* ---- Quick add: log a product APPLIED outside a test (e.g. shock). Logs + decrements + feeds usage. ---- */
 function openQuickAdd(){
-  const opts = INV_ORDER.filter(k=>S.shelf[k]).map(k=>({v:k, l:S.shelf[k].label+" ("+unitOf(S.shelf[k])+")"}));
+  const opts = INV_ORDER.filter(k=>S.shelf[k]).map(k=>({v:k, l:S.shelf[k].label+" ("+unitOf(S.shelf[k],k)+")"}));
   appForm("Log a product added", [
     {key:"prod", label:"Product", type:"select", options:opts, value:opts[0].v},
     {key:"amt", label:"Amount added", type:"number", step:"0.5", value:""},
@@ -2017,7 +2025,7 @@ function openQuickAdd(){
   ], (v)=>{
     const k=v.prod, amt=Number(v.amt);
     if(!amt||amt<=0){ toast("Enter an amount."); return; }
-    const it=S.shelf[k], u=unitOf(it);
+    const it=S.shelf[k], u=unitOf(it,k);
     const ts = v.date ? new Date(v.date+"T12:00:00").getTime() : Date.now();
     const amountStr = amt+" "+u;
     S.log.push({ts, standalone:true, readings:{}, doses:[{chem:k, product:it.label, amount:amountStr, added:true}], notes:"Added outside a test session."});
@@ -2047,12 +2055,13 @@ function renderShelf(){
     salt:"only relevant on a salt pool"
   };
   $("shelf-editor").innerHTML = Object.keys(cats).map(k=>{
-    const it = S.shelf[k]; const u = unitOf(it);
+    const it = S.shelf[k]; const u = unitOf(it,k);
     const trackOnly = isTrackingOnly(k);
     const treatsLine = !trackOnly
       ? '<div class="chip info" style="margin-top:4px;font-size:11px">Treats: '+esc(ROLE[k])+'</div>'
       : '<div style="margin-top:4px"><span class="chip" style="font-size:11px;background:var(--line)">Tracking only</span>'+
         (trackingNote[k]?' <span class="muted small">'+esc(trackingNote[k])+'</span>':'')+'</div>';
+    const hasBulk = it.buyUnit && it.buyQty>0;
     return '<div class="shelfitem" style="display:block;padding:12px 0;border-bottom:1px solid var(--line)">'+
       '<div class="cat" style="font-weight:600">'+cats[k]+'</div>'+
       treatsLine +
@@ -2063,17 +2072,23 @@ function renderShelf(){
       '</div>'+
       '<div class="row2" style="margin-top:6px">'+
         '<div><label class="f">Strength %</label><input type="number" data-shelf="'+k+'" data-fld="strength" value="'+it.strength+'" step="0.05" inputmode="decimal"></div>'+
-        '<div><label class="f">Consumption unit</label><input type="text" data-shelf="'+k+'" data-fld="unitLabel" value="'+esc(it.unitLabel||"")+'" placeholder="e.g. fl oz"></div>'+
+        '<div><label class="f">Dosed &amp; tracked in</label><input type="text" value="'+esc(u)+'" disabled style="background:var(--plaster);color:var(--mist)"></div>'+
       '</div>'+
-      '<div class="row2" style="margin-top:6px">'+
-        '<div><label class="f">Purchase unit</label><input type="text" data-shelf="'+k+'" data-fld="buyUnit" value="'+esc(it.buyUnit||"")+'" placeholder="e.g. gallon"></div>'+
-        '<div><label class="f">'+esc(u)+' per '+(it.buyUnit?esc(it.buyUnit):"purchase")+'</label><input type="number" data-shelf="'+k+'" data-fld="buyQty" value="'+(it.buyQty||0)+'" step="0.5" inputmode="decimal"></div>'+
+      '<div class="muted small" style="margin-top:3px">The tracking unit is set by the app to match its dosing instructions — not editable.</div>'+
+      '<div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--line)">'+
+        '<div class="small"><b>Buy-in-bulk shortcut</b> <span class="muted">(optional)</span></div>'+
+        '<div class="muted small">If you buy this in a fixed container, name it and give its size. You\'ll get a one-tap option when restocking.</div>'+
+        '<div class="row2" style="margin-top:6px">'+
+          '<div><label class="f">Container name</label><input type="text" data-shelf="'+k+'" data-fld="buyUnit" value="'+esc(it.buyUnit||"")+'" placeholder="e.g. gallon"></div>'+
+          '<div><label class="f">'+esc(u)+' per '+(it.buyUnit?esc(it.buyUnit):"container")+'</label><input type="number" data-shelf="'+k+'" data-fld="buyQty" value="'+(it.buyQty||0)+'" step="0.5" inputmode="decimal"></div>'+
+        '</div>'+
+        (hasBulk? '<div class="hint" style="margin-top:6px">1 '+esc(it.buyUnit)+' = '+it.buyQty+' '+esc(u)+'.</div>' : '')+
       '</div>'+
-      '<div style="margin-top:6px"><label class="f">Low-stock alert ('+esc(u)+')</label><input type="number" data-shelf="'+k+'" data-fld="lowAt" value="'+(it.lowAt||0)+'" step="0.5" inputmode="decimal"></div>'+
-      '<div class="muted small" style="margin-top:4px">Tracked &amp; used in <b>'+esc(u)+'</b>'+(it.buyUnit&&it.buyQty>0?'; bought as <b>'+esc(it.buyUnit)+'</b> = '+it.buyQty+' '+esc(u):'')+'.</div>'+
+      '<div style="margin-top:8px"><label class="f">Low-stock alert ('+esc(u)+')</label><input type="number" data-shelf="'+k+'" data-fld="lowAt" value="'+(it.lowAt||0)+'" step="0.5" inputmode="decimal"></div>'+
       '</div>';
   }).join("");
   $("shelf-editor").querySelectorAll("input").forEach(inp=>{
+    if(inp.disabled) return;
     inp.onchange = ()=>{ const it = S.shelf[inp.dataset.shelf], f = inp.dataset.fld;
       it[f] = (f==="strength"||f==="lowAt"||f==="buyQty")? Number(inp.value) : inp.value; save();
       renderShelf(); renderInventory(); renderDash(); };
